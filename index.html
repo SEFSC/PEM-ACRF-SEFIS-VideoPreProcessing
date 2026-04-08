@@ -7,7 +7,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
 
 
-<title>SEFSC Quarto Documentation Theme – App Name Documentation</title>
+<title>Read the Docs – App Name Documentation</title>
 <style>
 /* Default styles provided by pandoc.
 ** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
@@ -22,6 +22,41 @@ ul.task-list li input[type="checkbox"] {
   width: 0.8em;
   margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
   vertical-align: middle;
+}
+/* CSS for syntax highlighting */
+html { -webkit-text-size-adjust: 100%; }
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+  { counter-reset: source-line 0; }
+pre.numberSource code > span
+  { position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+  { content: counter(source-line);
+    position: relative; left: -1em; text-align: right; vertical-align: baseline;
+    border: none; display: inline-block;
+    -webkit-touch-callout: none; -webkit-user-select: none;
+    -khtml-user-select: none; -moz-user-select: none;
+    -ms-user-select: none; user-select: none;
+    padding: 0 4px; width: 4em;
+  }
+pre.numberSource { margin-left: 3em;  padding-left: 4px; }
+div.sourceCode
+  {   }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
 }
 </style>
 
@@ -44,9 +79,9 @@ ul.task-list li input[type="checkbox"] {
 <link href="site_libs/quarto-html/quarto-syntax-highlighting-845c23b38eaddc0f92fda52bfe77a8c8.css" rel="stylesheet" class="quarto-color-scheme-extra" id="quarto-text-highlighting-styles">
 <script src="site_libs/bootstrap/bootstrap.min.js"></script>
 <link href="site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
-<link href="site_libs/bootstrap/bootstrap-60b229e56efdf095b5c256164d3f55c7.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme" id="quarto-bootstrap" data-mode="light">
-<link href="site_libs/bootstrap/bootstrap-dark-631ec61e24da43daf3c4fcaf9e42848c.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme quarto-color-alternate" id="quarto-bootstrap" data-mode="dark">
-<link href="site_libs/bootstrap/bootstrap-60b229e56efdf095b5c256164d3f55c7.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme-extra" id="quarto-bootstrap" data-mode="light">
+<link href="site_libs/bootstrap/bootstrap-12c5e11255d1ba86debc14f9a0fb43fb.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme" id="quarto-bootstrap" data-mode="light">
+<link href="site_libs/bootstrap/bootstrap-dark-7cd8905afccf9e4aff4836e42671a711.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme quarto-color-alternate" id="quarto-bootstrap" data-mode="dark">
+<link href="site_libs/bootstrap/bootstrap-12c5e11255d1ba86debc14f9a0fb43fb.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme-extra" id="quarto-bootstrap" data-mode="light">
 <script id="quarto-search-options" type="application/json">{
   "location": "navbar",
   "copy-button": false,
@@ -299,7 +334,7 @@ ul.task-list li input[type="checkbox"] {
       <button type="button" class="quarto-btn-toggle btn" data-bs-toggle="collapse" role="button" data-bs-target=".quarto-sidebar-collapse-item" aria-controls="quarto-sidebar" aria-expanded="false" aria-label="Toggle sidebar navigation" onclick="if (window.quartoToggleHeadroom) { window.quartoToggleHeadroom(); }">
         <i class="bi bi-layout-text-sidebar-reverse"></i>
       </button>
-        <nav class="quarto-page-breadcrumbs" aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item">SEFSC Quarto Documentation Theme</li></ol></nav>
+        <nav class="quarto-page-breadcrumbs" aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item">Read the Docs</li></ol></nav>
         <a class="flex-grow-1" role="navigation" data-bs-toggle="collapse" data-bs-target=".quarto-sidebar-collapse-item" aria-controls="quarto-sidebar" aria-expanded="false" aria-label="Toggle sidebar navigation" onclick="if (window.quartoToggleHeadroom) { window.quartoToggleHeadroom(); }">      
         </a>
       <button type="button" class="btn quarto-search-button" aria-label="Search" onclick="window.quartoOpenSearch();">
@@ -343,6 +378,12 @@ ul.task-list li input[type="checkbox"] {
   <div class="sidebar-item-container"> 
   <a href="./content/docs/index.html" class="sidebar-item-text sidebar-link">
  <span class="menu-text">Read the Docs</span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="./content/setup.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Getting Started</span></a>
   </div>
 </li>
           <li class="sidebar-item sidebar-item-section">
@@ -472,9 +513,18 @@ ul.task-list li input[type="checkbox"] {
   <li><a href="#about" id="toc-about" class="nav-link active" data-scroll-target="#about">About</a></li>
   <li><a href="#usage" id="toc-usage" class="nav-link" data-scroll-target="#usage">Usage</a></li>
   <li><a href="#options" id="toc-options" class="nav-link" data-scroll-target="#options">Options</a></li>
-  <li><a href="#release-notes" id="toc-release-notes" class="nav-link" data-scroll-target="#release-notes">Release Notes</a></li>
+  <li><a href="#dependencies" id="toc-dependencies" class="nav-link" data-scroll-target="#dependencies">Dependencies</a>
+  <ul class="collapse">
+  <li><a href="#python-libraries" id="toc-python-libraries" class="nav-link" data-scroll-target="#python-libraries">Python Libraries</a></li>
+  <li><a href="#recommendations" id="toc-recommendations" class="nav-link" data-scroll-target="#recommendations">Recommendations</a></li>
+  </ul></li>
+  <li><a href="#release-notes" id="toc-release-notes" class="nav-link" data-scroll-target="#release-notes">Release Notes</a>
+  <ul class="collapse">
+  <li><a href="#license" id="toc-license" class="nav-link" data-scroll-target="#license">License</a></li>
+  <li><a href="#disclaimer" id="toc-disclaimer" class="nav-link" data-scroll-target="#disclaimer">Disclaimer</a></li>
+  </ul></li>
   </ul>
-<div class="toc-actions"><ul><li><a href="https://github.com/SEFSC/SEFSC-documentation-quarto-skeleton/blob/docs/index.qmd" class="toc-action"><i class="bi bi-github"></i>View source</a></li><li><a href="https://github.com/SEFSC/SEFSC-documentation-quarto-skeleton/issues/new" class="toc-action"><i class="bi empty"></i>Report an issue</a></li></ul></div></nav>
+<div class="toc-actions"><ul><li><a href="https://github.com/MattGrossi-NOAA/PEM-ACRF-SEFIS-VideoPreProcessing/blob/docs/index.qmd" class="toc-action"><i class="bi bi-github"></i>View source</a></li><li><a href="https://github.com/MattGrossi-NOAA/PEM-ACRF-SEFIS-VideoPreProcessing/issues/new" class="toc-action"><i class="bi empty"></i>Report an issue</a></li></ul></div></nav>
     </div>
 <!-- main -->
 <main class="content column-body" id="quarto-document-content">
@@ -482,8 +532,8 @@ ul.task-list li input[type="checkbox"] {
 
 <header id="title-block-header" class="quarto-title-block default">
 <div class="quarto-title">
-<h1 class="title">SEFSC Quarto Documentation Theme</h1>
-<p class="subtitle lead">This is a placeholder markdown document that will render as the index.html page for the documentation site. Replace content as desired.</p>
+<h1 class="title">Read the Docs</h1>
+<p class="subtitle lead">Python utility for clipping and splicing GoPro video from SEFIS video surveys</p>
 </div>
 
 
@@ -500,34 +550,155 @@ ul.task-list li input[type="checkbox"] {
 </header>
 
 
-<p>This is a template for a simple Quarto website that looks like a “book”. This is a common format for documentation. It includes a <a href="https://github.com/nmfs-opensci/NOAA-quarto-simple-python/blob/main/.github/workflows/render-and-publish.yml">GitHub Action</a> that will build the website automatically when you make changes to the files. The NOAA palette and fonts has been added to <code>theme.scss</code>. The webpage will be on the <code>gh-pages</code> branch. Serving the website files from this branch is a common way to keep all the website files from cluttering your main branch.</p>
-<p>This Quarto website has Python code in the <code>code.qmd</code> file and has a Jupyter notebook. The GitHub Action will render those for you but note that you need some a special <strong>RAW</strong> block at the top of your ipynb file. Without this, the Jupyter notebook won’t render (code blocks won’t be computed). It looks like this</p>
-<pre><code>---
-title: Jupyter Notebook
-execute:
-  enabled: true
-jupyter: python3
----</code></pre>
-<p>Also you will need to add any modules that your code needs to the <code>requirements.txt</code> file so they are installed by the GitHub Action.</p>
-<p>The documentation page would start at <a href="./content/docs/index.html">Read the Docs</a>.</p>
-<p>Instructions for using this theme can be found in the <a href="./content/howto/setup.html">HOWTO: Using the SEFSC Quarto Theme</a> pages.</p>
+<p>This is a simple Python utility used for merging GoPro videos collected during SEFIS video surveys. GoPro cameras are deployed for about an hour at a time and record continuously during this period, but the video files are automatically split into 4GB chunks by GoPro video processing software, which each file containing about 15 minutes of footage. Current protocol involves processing a 24-minute video segment from each deployment relative to the time the camera reaches the bottom.</p>
 <section id="about" class="level2">
 <h2 class="anchored" data-anchor-id="about">About</h2>
-<p>A brief high-level description of what this application is used for and what it does.</p>
-<p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed condimentum porta iaculis. Vestibulum semper scelerisque nunc, ac sagittis quam ornare eget. Sed massa dui, vehicula at magna non, semper porttitor dolor. Pellentesque eget augue purus. Cras quis urna iaculis, aliquam urna non, malesuada velit. Suspendisse arcu diam, fringilla in ex fringilla, ultrices pharetra orci. Phasellus leo sapien, elementum vitae tempus in, aliquet vitae leo. Cras eros urna, suscipit tincidunt mi id, dignissim eleifend ante. Etiam ullamcorper dui auctor leo dapibus, at varius lorem mattis. Morbi maximus velit id nisi luctus commodo. Mauris ut bibendum urna, vel lobortis felis. Duis convallis mauris quis finibus dignissim.</p>
-<p>Fusce interdum et ex eget maximus. Nam rhoncus elementum facilisis. Curabitur sagittis facilisis lectus, in viverra urna fermentum id. Praesent eget est libero. Praesent accumsan sed ex id finibus. In sed augue non tortor porta tristique vitae elementum sapien. Duis enim sapien, varius non nulla sit amet, mattis pharetra tellus. Ut volutpat placerat risus vitae faucibus. Pellentesque habitant morbi tristique senectus et netus et malesuada fames ac turpis egestas.</p>
+<p>This script does three things:</p>
+<ol type="1">
+<li>Determines where in the collection of videos for a given deployment the desired 24-minute segment is located using a <code>csv</code> file containing timestamps for when the camera reached the bottom</li>
+<li>Clips the relevant portion of partial videos at the appropriate start and end times</li>
+<li>Stitches the required videos together into a single video file for each deployment.</li>
+</ol>
+<p>An optional diagnostic mode can be used to embed the video timestamp into the video frames (formatted HH:MM:SS:FF) to help find the splice times, since some video software do not preserve the original frame rate or fail to display the full time during playback. Engaging diagnostic mode will also print out a table of the splice times for each deployment to the console including where in the original video files the segments were taken.</p>
+<div class="callout callout-style-default callout-note callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+Note
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<p>This table is always added to a log file even when diagnostic mode is off, but printing to the screen can be helpful for troubleshooting and verifying the splice times.</p>
+</div>
+</div>
 </section>
 <section id="usage" class="level2">
 <h2 class="anchored" data-anchor-id="usage">Usage</h2>
-<p>Describe how to use the application.</p>
-<p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed condimentum porta iaculis. Vestibulum semper scelerisque nunc, ac sagittis quam ornare eget. Sed massa dui, vehicula at magna non, semper porttitor dolor. Pellentesque eget augue purus. Cras quis urna iaculis, aliquam urna non, malesuada velit. Suspendisse arcu diam, fringilla in ex fringilla, ultrices pharetra orci. Phasellus leo sapien, elementum vitae tempus in, aliquet vitae leo. Cras eros urna, suscipit tincidunt mi id, dignissim eleifend ante. Etiam ullamcorper dui auctor leo dapibus, at varius lorem mattis. Morbi maximus velit id nisi luctus commodo. Mauris ut bibendum urna, vel lobortis felis. Duis convallis mauris quis finibus dignissim.</p>
-<p>Fusce interdum et ex eget maximus. Nam rhoncus elementum facilisis. Curabitur sagittis facilisis lectus, in viverra urna fermentum id. Praesent eget est libero. Praesent accumsan sed ex id finibus. In sed augue non tortor porta tristique vitae elementum sapien. Duis enim sapien, varius non nulla sit amet, mattis pharetra tellus. Ut volutpat placerat risus vitae faucibus. Pellentesque habitant morbi tristique senectus et netus et malesuada fames ac turpis egestas.</p>
+<p>Running the script is straightforward. After activating the appropriate Python environment, simply call the script from the command line specifying the configuration YAML file to use:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb1"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> clip_and_splice.py configurations.yaml</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p>If the configuration file is not co-located with the script, simply include the path to the file so that the script knows where to find it:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb2"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> clip_and_splice.py path/to/configurations.yaml</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p>for more information, including an execution example, see <a href="usage.qmd">Using the Model</a>.</p>
 </section>
 <section id="options" class="level2">
 <h2 class="anchored" data-anchor-id="options">Options</h2>
-<p>List and describe all available options.</p>
-<p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed condimentum porta iaculis. Vestibulum semper scelerisque nunc, ac sagittis quam ornare eget. Sed massa dui, vehicula at magna non, semper porttitor dolor. Pellentesque eget augue purus. Cras quis urna iaculis, aliquam urna non, malesuada velit. Suspendisse arcu diam, fringilla in ex fringilla, ultrices pharetra orci. Phasellus leo sapien, elementum vitae tempus in, aliquet vitae leo. Cras eros urna, suscipit tincidunt mi id, dignissim eleifend ante. Etiam ullamcorper dui auctor leo dapibus, at varius lorem mattis. Morbi maximus velit id nisi luctus commodo. Mauris ut bibendum urna, vel lobortis felis. Duis convallis mauris quis finibus dignissim.</p>
-<p>Fusce interdum et ex eget maximus. Nam rhoncus elementum facilisis. Curabitur sagittis facilisis lectus, in viverra urna fermentum id. Praesent eget est libero. Praesent accumsan sed ex id finibus. In sed augue non tortor porta tristique vitae elementum sapien. Duis enim sapien, varius non nulla sit amet, mattis pharetra tellus. Ut volutpat placerat risus vitae faucibus. Pellentesque habitant morbi tristique senectus et netus et malesuada fames ac turpis egestas.</p>
+<p>All user options are contained in a config YAML file (called <code>configurations.yml</code> by default, but can be named anything) to allow easier control and greater reproducibility. Settings are entered as key: value pairs as described below.</p>
+<table class="caption-top table">
+<caption>Paths and associated settings</caption>
+<colgroup>
+<col style="width: 23%">
+<col style="width: 76%">
+</colgroup>
+<thead>
+<tr class="header">
+<th style="text-align: left;">Key</th>
+<th style="text-align: left;">Description</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: left;"><code>input_directory</code></td>
+<td style="text-align: left;">Path to parent folder containing subfolders for set of videos. The subfolders should be named according to the deployment name (e.g., <code>DEPLOYMENT_001</code>), which will be used to name the new video file, and should contain all of the video files for that deployment.</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;"><code>output_directory</code></td>
+<td style="text-align: left;">Path to folder where the new video file will be saved. The new video will automatically be named according to the deployment name (e.g., <code>DEPLOYMENT_001.MP4</code>).</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;"><code>csv_path</code></td>
+<td style="text-align: left;">Path to the “time-on-bottom” CSV file. This file should contain entries for each deployment (subfolder) in rows with deployment name in one column and “time-on-bottom” in a separate column. Any other columns will be ignored.</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;"><code>col_foldername</code></td>
+<td style="text-align: left;">Column name for the column containing the deployment or folder name. Defaults to <code>foldername</code> but can be changed here if needed.</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;"><code>col_timebottom</code></td>
+<td style="text-align: left;">Column name for the column containing the “time-on-bottom” timestamps. Defaults to <code>time_on_bottom</code> but can be changed here if needed.</td>
+</tr>
+</tbody>
+</table>
+<table class="caption-top table">
+<caption>Processing settings</caption>
+<thead>
+<tr class="header">
+<th style="text-align: left;">Key</th>
+<th style="text-align: left;">Description</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: left;"><code>reprocess</code></td>
+<td style="text-align: left;">If true, existing stitched videos will be overwritten. Otherwise, skips folders where the output file already exists. Defaults to false.</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;"><code>diagnostic_mode</code></td>
+<td style="text-align: left;">If true, runs in diagnostic mode which prints the video cut times and embeds the time into the video itself, which is independent of the video player’s time stamp, to verify splicing. Defaults to false.</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;"><code>use_gpu</code></td>
+<td style="text-align: left;">Whether to use GPU acceleration, if available. Requires GPU hardware and compatible <code>ffmpeg</code> build (see <a href="#dependencies">below</a>). Defaults to false.</td>
+</tr>
+</tbody>
+</table>
+<table class="caption-top table">
+<caption>Video processing utilities. These should not need to be changed once set but may vary between computers and users.</caption>
+<thead>
+<tr class="header">
+<th style="text-align: left;">Key</th>
+<th style="text-align: left;">Description</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: left;"><code>ffmpeg_path</code></td>
+<td style="text-align: left;">Path to the executable <code>ffmpeg</code> utility (see <a href="#dependencies">below</a>).</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;"><code>ffprobe_path</code></td>
+<td style="text-align: left;">Path to the executable <code>ffprobe</code> utility (see <a href="#dependencies">below</a>).</td>
+</tr>
+</tbody>
+</table>
+<div class="callout callout-style-default callout-important callout-titled" title="A note on file paths">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Important</span>A note on file paths
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<p>Use forward slashes (/) or double backslashes (\) for Windows paths to avoid issues with escape characters. For example, <code>C:/Users/username/Documents/configurations.yaml</code> or <code>C:\\Users\\username\\Documents\\configurations.yaml</code>.</p>
+</div>
+</div>
+</section>
+<section id="dependencies" class="level2">
+<h2 class="anchored" data-anchor-id="dependencies">Dependencies</h2>
+<ul>
+<li><a href="https://cli.github.com/">Git CLI</a> (for repository cloning)</li>
+<li><a href="https://www.python.org/downloads/">Python</a> &gt;= 3.14</li>
+<li><code>ffmpeg</code> and <code>ffprobe</code> &gt;= 6.1</li>
+</ul>
+<p>Both <code>ffmpeg</code> and <code>ffprobe</code> utilities are included in the <code>ffmpeg</code> download available <a href="https://ffmpeg.org/download.html">here</a>.</p>
+<section id="python-libraries" class="level3">
+<h3 class="anchored" data-anchor-id="python-libraries">Python Libraries</h3>
+<ul>
+<li>pandas &gt;= 3.0.2</li>
+<li>pyyaml &gt;= 6.0.3</li>
+<li>tqdm &gt;= 4.67.3</li>
+</ul>
+<p>These can be installed from the accompanying `requirements.txt’ file. See <a href="setup.qmd">Getting Started</a> for instructions on how to set up a Python environment and install dependencies.</p>
+</section>
+<section id="recommendations" class="level3">
+<h3 class="anchored" data-anchor-id="recommendations">Recommendations</h3>
+<ul>
+<li><a href="https://www.anaconda.com/download">Anaconda</a> (for virtual environment implementation)</li>
+</ul>
+</section>
 </section>
 <section id="release-notes" class="level2">
 <h2 class="anchored" data-anchor-id="release-notes">Release Notes</h2>
@@ -538,42 +709,20 @@ jupyter: python3
 </summary>
 <ul>
 <li>
-<b>Version 1.0</b> (Sep 2023): Initial version
-</li>
-<li>
-<b>Version 1.1</b> (Mon YYYY): Revised to include:
-<ul>
-<li>
-Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed condimentum porta iaculis. Vestibulum semper scelerisque nunc, ac sagittis quam ornare eget. Sed massa dui, vehicula at magna non, semper porttitor dolor. Pellentesque eget augue purus.
-</li>
-<li>
-Cras quis urna iaculis, aliquam urna non, malesuada velit. Suspendisse arcu diam, fringilla in ex fringilla, ultrices pharetra orci. Phasellus leo sapien, elementum vitae tempus in, aliquet vitae leo. Cras eros urna, suscipit tincidunt mi id, dignissim eleifend ante.
-</li>
-<li>
-Etiam ullamcorper dui auctor leo dapibus, at varius lorem mattis. Morbi maximus velit id nisi luctus commodo. Mauris ut bibendum urna, vel lobortis felis. Duis convallis mauris quis finibus dignissim.
-</li>
-</ul>
-</li>
-<li>
-<b>Version 2.0</b> (Mon YYYY): Fusce interdum et ex eget maximus. Nam rhoncus elementum facilisis. Curabitur sagittis facilisis lectus, in viverra urna fermentum id. Praesent eget est libero. Praesent accumsan sed ex id finibus. In sed augue non tortor porta tristique vitae elementum sapien. Duis enim sapien, varius non nulla sit amet, mattis pharetra tellus. Ut volutpat placerat risus vitae faucibus. Pellentesque habitant morbi tristique senectus et netus et malesuada fames ac turpis egestas.
+<b>Version 2026.0.1 (BETA)</b> (Apr 2026): Initial version for testing
 </li>
 </ul>
 </details>
-<div class="callout callout-style-default callout-important callout-titled">
-<div class="callout-header d-flex align-content-center">
-<div class="callout-icon-container">
-<i class="callout-icon"></i>
-</div>
-<div class="callout-title-container flex-fill">
-Important
-</div>
-</div>
-<div class="callout-body-container callout-body">
+<section id="license" class="level3">
+<h3 class="anchored" data-anchor-id="license">License</h3>
+<p>Software code created by U.S. Government employees is not subject to copyright in the United States (17 U.S.C. §105). The United States/Department of Commerce reserve all rights to seek and obtain copyright protection in countries other than the United States for Software authored in its entirety by the Department of Commerce. To this end, the Department of Commerce hereby grants to Recipient a royalty-free, nonexclusive license to use, copy, and create derivative works of the Software outside of the United States.</p>
+</section>
+<section id="disclaimer" class="level3">
+<h3 class="anchored" data-anchor-id="disclaimer">Disclaimer</h3>
 <p>This software is a scientific product and is not official communication of the National Oceanic and Atmospheric Administration, or the United States Department of Commerce. All NOAA software and project code is provided on an “as is” basis and the user assumes responsibility for its use. Any claims against the Department of Commerce or Department of Commerce bureaus stemming from the use of this software will be governed by all applicable Federal law. Any reference to specific commercial products, processes, or services by service mark, trademark, manufacturer, or otherwise, does not constitute or imply their endorsement, recommendation or favoring by the Department of Commerce. The Department of Commerce seal and logo, or the seal and logo of a DOC bureau, shall not be used in any manner to imply endorsement of any commercial product or activity by DOC or the United States Government.</p>
-</div>
-</div>
 
 
+</section>
 </section>
 
 </main> <!-- /main -->
@@ -663,7 +812,7 @@ Important
     }
       var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
       var mailtoRegex = new RegExp(/^mailto:/);
-        var filterRegex = new RegExp("https:\/\/sefsc\.github\.io\/SEFSC-documentation-quarto-skeleton");
+        var filterRegex = new RegExp("https:\/\/mattgrossi-noaa\.github\.io\/PEM-ACRF-SEFIS-VideoPreProcessing");
       var isInternal = (href) => {
           return filterRegex.test(href) || localhostRegex.test(href) || mailtoRegex.test(href);
       }
@@ -998,7 +1147,7 @@ Important
 </div>   
     <div class="nav-footer-center">
       &nbsp;
-    <div class="toc-actions d-sm-block d-md-none"><ul><li><a href="https://github.com/SEFSC/SEFSC-documentation-quarto-skeleton/blob/docs/index.qmd" class="toc-action"><i class="bi bi-github"></i>View source</a></li><li><a href="https://github.com/SEFSC/SEFSC-documentation-quarto-skeleton/issues/new" class="toc-action"><i class="bi empty"></i>Report an issue</a></li></ul></div></div>
+    <div class="toc-actions d-sm-block d-md-none"><ul><li><a href="https://github.com/MattGrossi-NOAA/PEM-ACRF-SEFIS-VideoPreProcessing/blob/docs/index.qmd" class="toc-action"><i class="bi bi-github"></i>View source</a></li><li><a href="https://github.com/MattGrossi-NOAA/PEM-ACRF-SEFIS-VideoPreProcessing/issues/new" class="toc-action"><i class="bi empty"></i>Report an issue</a></li></ul></div></div>
     <div class="nav-footer-right">
 <p><a href="https://noaa.gov">NOAA</a> <br> <a href="https//fisheries.noaa.gov">NOAA Fisheries</a> <br> <a href="https://www.fisheries.noaa.gov/contact/southeast-fisheries-science-center">Southeast Fisheries Science Center</a></p>
 <p>This page is built with <a href="https://quarto.org/">Quarto</a>. © CC-1.0</p>
