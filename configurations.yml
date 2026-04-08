@@ -28,7 +28,7 @@ diagnostic_mode: false
 
 # Clear log: If true, clears the log file at the start of each run. Otherwise,
 # appends to the existing log. Defaults to false.
-clear_log: true
+clear_log: false
 
 # Whether to use GPU acceleration (requires compatible ffmpeg build and GPU)
 use_gpu: true
