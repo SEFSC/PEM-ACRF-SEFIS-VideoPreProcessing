@@ -483,6 +483,10 @@ def process_deployments(config_path):
         if result.returncode != 0:
             with open(config['log_file'], "a") as log:
                 log.write(f"ERROR in {folder_id}: {result.stderr}\n")
+    
+    # Add space to end of log file for readability between runs
+    with open(config['log_file'], "a") as log:
+        log.write("\n\n\n")
 
 if __name__ == "__main__":
     # Parse command-line arguments
