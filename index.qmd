@@ -1,49 +1,93 @@
 ---
-title: "SEFSC Quarto Documentation Theme"
-subtitle: "This is a placeholder markdown document that will render as the index.html page for the documentation site. Replace content as desired."
+title: "Read the Docs"
+subtitle: "Python utility for clipping and splicing GoPro video from SEFIS video surveys"
 page-layout: full
 ---
 
-This is a template for a simple Quarto website that looks like a "book". This is a common format for documentation. It includes a [GitHub Action](https://github.com/nmfs-opensci/NOAA-quarto-simple-python/blob/main/.github/workflows/render-and-publish.yml) that will build the website automatically when you make changes to the files. The NOAA palette and fonts has been added to `theme.scss`. The webpage will be on the `gh-pages` branch. Serving the website files from this branch is a common way to keep all the website files from cluttering your main branch. 
-
-This Quarto website has Python code in the `code.qmd` file and has a Jupyter notebook. The GitHub Action will render those for you but note that you need some a special **RAW** block at the top of your ipynb file. Without this, the Jupyter notebook won't render (code blocks won't be computed). It looks like this
-```
----
-title: Jupyter Notebook
-execute:
-  enabled: true
-jupyter: python3
----
-```
-Also you will need to add any modules that your code needs to the `requirements.txt` file so they are installed by the GitHub Action.
-
-The documentation page would start at [Read the Docs](/content/docs/index.qmd).
-
-Instructions for using this theme can be found in the [HOWTO: Using the SEFSC Quarto Theme](/content/howto/setup.qmd) pages.
+This is a simple Python utility used for merging GoPro videos collected during SEFIS video surveys. GoPro cameras are deployed for about an hour at a time and record continuously during this period, but the video files are automatically split into 4GB chunks by GoPro video processing software, which each file containing about 15 minutes of footage. Current protocol involves processing a 24-minute video segment from each deployment relative to the time the camera reaches the bottom.
 
 ## About
 
-A brief high-level description of what this application is used for and what it does.
+This script does three things:
 
-Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed condimentum porta iaculis. Vestibulum semper scelerisque nunc, ac sagittis quam ornare eget. Sed massa dui, vehicula at magna non, semper porttitor dolor. Pellentesque eget augue purus. Cras quis urna iaculis, aliquam urna non, malesuada velit. Suspendisse arcu diam, fringilla in ex fringilla, ultrices pharetra orci. Phasellus leo sapien, elementum vitae tempus in, aliquet vitae leo. Cras eros urna, suscipit tincidunt mi id, dignissim eleifend ante. Etiam ullamcorper dui auctor leo dapibus, at varius lorem mattis. Morbi maximus velit id nisi luctus commodo. Mauris ut bibendum urna, vel lobortis felis. Duis convallis mauris quis finibus dignissim.
+1. Determines where in the collection of videos for a given deployment the desired 24-minute segment is located using a `csv` file containing timestamps for when the camera reached the bottom
+2. Clips the relevant portion of partial videos at the appropriate start and end times
+3. Stitches the required videos together into a single video file for each deployment.
 
-Fusce interdum et ex eget maximus. Nam rhoncus elementum facilisis. Curabitur sagittis facilisis lectus, in viverra urna fermentum id. Praesent eget est libero. Praesent accumsan sed ex id finibus. In sed augue non tortor porta tristique vitae elementum sapien. Duis enim sapien, varius non nulla sit amet, mattis pharetra tellus. Ut volutpat placerat risus vitae faucibus. Pellentesque habitant morbi tristique senectus et netus et malesuada fames ac turpis egestas.
+An optional diagnostic mode can be used to embed the video timestamp into the video frames (formatted HH:MM:SS:FF) to help find the splice times, since some video software do not preserve the original frame rate or fail to display the full time during playback. Engaging diagnostic mode will also print out a table of the splice times for each deployment to the console including where in the original video files the segments were taken.
+
+::: {.callout-note}
+This table is always added to a log file even when diagnostic mode is off, but printing to the screen can be helpful for troubleshooting and verifying the splice times.
+:::
 
 ## Usage
 
-Describe how to use the application.
+Running the script is straightforward. After activating the appropriate Python environment, simply call the script from the command line specifying the configuration YAML file to use:
 
-Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed condimentum porta iaculis. Vestibulum semper scelerisque nunc, ac sagittis quam ornare eget. Sed massa dui, vehicula at magna non, semper porttitor dolor. Pellentesque eget augue purus. Cras quis urna iaculis, aliquam urna non, malesuada velit. Suspendisse arcu diam, fringilla in ex fringilla, ultrices pharetra orci. Phasellus leo sapien, elementum vitae tempus in, aliquet vitae leo. Cras eros urna, suscipit tincidunt mi id, dignissim eleifend ante. Etiam ullamcorper dui auctor leo dapibus, at varius lorem mattis. Morbi maximus velit id nisi luctus commodo. Mauris ut bibendum urna, vel lobortis felis. Duis convallis mauris quis finibus dignissim.
+```bash
+python clip_and_splice.py configurations.yaml
+```
 
-Fusce interdum et ex eget maximus. Nam rhoncus elementum facilisis. Curabitur sagittis facilisis lectus, in viverra urna fermentum id. Praesent eget est libero. Praesent accumsan sed ex id finibus. In sed augue non tortor porta tristique vitae elementum sapien. Duis enim sapien, varius non nulla sit amet, mattis pharetra tellus. Ut volutpat placerat risus vitae faucibus. Pellentesque habitant morbi tristique senectus et netus et malesuada fames ac turpis egestas.
+If the configuration file is not co-located with the script, simply include the path to the file so that the script knows where to find it:
+
+```bash
+python clip_and_splice.py path/to/configurations.yaml
+```
+
+for more information, including an execution example, see [Using the Model](usage.qmd).
+
 
 ## Options
 
-List and describe all available options.
+All user options are contained in a config YAML file (called `configurations.yml` by default, but can be named anything) to allow easier control and greater reproducibility. Settings are entered as key: value pairs as described below.
 
-Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed condimentum porta iaculis. Vestibulum semper scelerisque nunc, ac sagittis quam ornare eget. Sed massa dui, vehicula at magna non, semper porttitor dolor. Pellentesque eget augue purus. Cras quis urna iaculis, aliquam urna non, malesuada velit. Suspendisse arcu diam, fringilla in ex fringilla, ultrices pharetra orci. Phasellus leo sapien, elementum vitae tempus in, aliquet vitae leo. Cras eros urna, suscipit tincidunt mi id, dignissim eleifend ante. Etiam ullamcorper dui auctor leo dapibus, at varius lorem mattis. Morbi maximus velit id nisi luctus commodo. Mauris ut bibendum urna, vel lobortis felis. Duis convallis mauris quis finibus dignissim.
+| Key              | Description                                              |
+|:-----------------|:---------------------------------------------------------|
+`input_directory`  | Path to parent folder containing subfolders for set of videos. The subfolders should be named according to the deployment name (e.g., `DEPLOYMENT_001`), which will be used to name the new video file, and should contain all of the video files for that deployment.
+`output_directory` | Path to folder where the new video file will be saved. The new video will automatically be named according to the deployment name (e.g., `DEPLOYMENT_001.MP4`).
+`csv_path`         | Path to the "time-on-bottom" CSV file. This file should contain entries for each deployment (subfolder) in rows with deployment name in one column and "time-on-bottom" in a separate column. Any other columns will be ignored.
+`col_foldername`   | Column name for the column containing the deployment or folder name. Defaults to `foldername` but can be changed here if needed.
+`col_timebottom`   | Column name for the column containing the "time-on-bottom" timestamps. Defaults to `time_on_bottom` but can be changed here if needed.
+: Paths and associated settings
 
-Fusce interdum et ex eget maximus. Nam rhoncus elementum facilisis. Curabitur sagittis facilisis lectus, in viverra urna fermentum id. Praesent eget est libero. Praesent accumsan sed ex id finibus. In sed augue non tortor porta tristique vitae elementum sapien. Duis enim sapien, varius non nulla sit amet, mattis pharetra tellus. Ut volutpat placerat risus vitae faucibus. Pellentesque habitant morbi tristique senectus et netus et malesuada fames ac turpis egestas.
+| Key              | Description                                              |
+|:-----------------|:---------------------------------------------------------|
+`reprocess`        | If true, existing stitched videos will be overwritten. Otherwise, skips folders where the output file already exists. Defaults to false.
+`diagnostic_mode`  | If true, runs in diagnostic mode which prints the video cut times and embeds the time into the video itself, which is independent of the video player's time stamp, to verify splicing. Defaults to false.
+`use_gpu`          | Whether to use GPU acceleration, if available. Requires GPU hardware and compatible `ffmpeg` build (see [below](#dependencies)). Defaults to false. 
+: Processing settings
+
+| Key              | Description                                              |
+|:-----------------|:---------------------------------------------------------|
+`ffmpeg_path`      | Path to the executable `ffmpeg` utility (see [below](#dependencies)).
+`ffprobe_path`     | Path to the executable `ffprobe` utility (see [below](#dependencies)).
+: Video processing utilities. These should not need to be changed once set but may vary between computers and users.
+
+
+::: {.callout-important title="A note on file paths"}
+Use forward slashes (/) or double backslashes (\\) for Windows paths to avoid issues with escape characters. For example, `C:/Users/username/Documents/configurations.yaml` or `C:\\Users\\username\\Documents\\configurations.yaml`.
+:::
+
+## Dependencies
+
+* [Git CLI](https://cli.github.com/) (for repository cloning)
+* [Python](https://www.python.org/downloads/) >= 3.14
+* `ffmpeg` and `ffprobe` >= 6.1
+
+Both `ffmpeg` and `ffprobe` utilities are included in the `ffmpeg` download available [here](https://ffmpeg.org/download.html).
+
+### Python Libraries
+
+* pandas >= 3.0.2
+* pyyaml >= 6.0.3
+* tqdm >= 4.67.3
+
+These can be installed from the accompanying `requirements.txt' file. See [Getting Started](setup.qmd) for instructions on how to set up a Python environment and install dependencies.
+
+### Recommendations
+
+* [Anaconda](https://www.anaconda.com/download) (for virtual environment implementation)
+
 
 ## Release Notes
 
@@ -54,17 +98,15 @@ Version history summarizing the stages of development, enhancements, bug fixes, 
     <b> Version History </b>
   </summary>
   <ul>
-    <li> <b>Version 1.0</b> (Sep 2023): Initial version </li>
-    <li> <b>Version 1.1</b> (Mon YYYY): Revised to include:
-      <ul>
-        <li> Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed condimentum porta iaculis. Vestibulum semper scelerisque nunc, ac sagittis quam ornare eget. Sed massa dui, vehicula at magna non, semper porttitor dolor. Pellentesque eget augue purus. </li>
-        <li> Cras quis urna iaculis, aliquam urna non, malesuada velit. Suspendisse arcu diam, fringilla in ex fringilla, ultrices pharetra orci. Phasellus leo sapien, elementum vitae tempus in, aliquet vitae leo. Cras eros urna, suscipit tincidunt mi id, dignissim eleifend ante. </li> 
-        <li> Etiam ullamcorper dui auctor leo dapibus, at varius lorem mattis. Morbi maximus velit id nisi luctus commodo. Mauris ut bibendum urna, vel lobortis felis. Duis convallis mauris quis finibus dignissim. </li>
-      </ul> </li>
-    <li> <b>Version 2.0</b> (Mon YYYY): Fusce interdum et ex eget maximus. Nam rhoncus elementum facilisis. Curabitur sagittis facilisis lectus, in viverra urna fermentum id. Praesent eget est libero. Praesent accumsan sed ex id finibus. In sed augue non tortor porta tristique vitae elementum sapien. Duis enim sapien, varius non nulla sit amet, mattis pharetra tellus. Ut volutpat placerat risus vitae faucibus. Pellentesque habitant morbi tristique senectus et netus et malesuada fames ac turpis egestas. </li>
+    <li> <b>Version 2026.0.1 (BETA)</b> (Apr 2026): Initial version for testing </li>
   </ul>
 </details>
 
-:::{.callout-important}
+
+### License
+
+Software code created by U.S. Government employees is not subject to copyright in the United States (17 U.S.C. §105). The United States/Department of Commerce reserve all rights to seek and obtain copyright protection in countries other than the United States for Software authored in its entirety by the Department of Commerce. To this end, the Department of Commerce hereby grants to Recipient a royalty-free, nonexclusive license to use, copy, and create derivative works of the Software outside of the United States.
+
+### Disclaimer
+
 This software is a scientific product and is not official communication of the National Oceanic and Atmospheric Administration, or the United States Department of Commerce. All NOAA software and project code is provided on an "as is" basis and the user assumes responsibility for its use. Any claims against the Department of Commerce or Department of Commerce bureaus stemming from the use of this software will be governed by all applicable Federal law. Any reference to specific commercial products, processes, or services by service mark, trademark, manufacturer, or otherwise, does not constitute or imply their endorsement, recommendation or favoring by the Department of Commerce. The Department of Commerce seal and logo, or the seal and logo of a DOC bureau, shall not be used in any manner to imply endorsement of any commercial product or activity by DOC or the United States Government.
-:::

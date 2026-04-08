@@ -1,0 +1,28 @@
+---
+title: Getting Started
+subtitle: Creating and configuration a Python virtual environment
+metadata-files:
+  - ../_metadata.yml
+order: 1
+---
+
+:::{.callout-note}
+The instructions on this page only need to be carried out once. If you have already installed the required dependencies and created a virtual environment, skip ahead to [Using the Model](usage.qmd).
+:::
+
+Much of the following is carried out using command line. In the instructions below, "command line terminal" or "terminal" refer to any command line application for the given operating system. For Windows, this is commonly Command Prompt or Windows Powershell. These use DOS commands. For UNIX users, Git Bash is a good alternative; it is included in [Git for Windows](#git) and allows UNIX commands to be used instead of DOS.
+
+### Software Installation
+
+#### git
+
+If the [Git CLI](https://git-scm.com/downloads) is already installed, there should be a Git Bash program in your Applications. If so, open this program and verify everything is working by typing
+
+```bash
+git --version
+```
+
+This should display the version of git installed on the system.
+
+If needed, download and install the [Git CLI](https://git-scm.com/downloads) before continuing. This does not need administrative privileges to install at the user level. Confirm that it has been installed by opening a command line terminal and entering `git --version`.
+
