@@ -1,21 +1,21 @@
-# PATH SETTINGS
-# -------------
+# ----- PATH SETTINGS -----
 # Use forward slashes (/) or double backslashes (\\) for Windows paths
 
 # Parent folder containing subfolders for each set of videos (e.g., T60253002_A)
-input_directory: "C:\\Users\\matt.grossi\\Documents\\gh-repos\\PEM-ACRF-SEFIS-VideoPreProcessing\\_videos"
+input_directory: "N:\\VIDEO_DATA\\2025_SEFIS_STITCHING_CLIPPING"
 
 # Where the stitched videos will be saved
-output_directory: "C:\\Users\\matt.grossi\\Documents\\gh-repos\\PEM-ACRF-SEFIS-VideoPreProcessing\\_videos"
+output_directory: "N:\\VIDEO_DATA\\2025_SEFIS_STITCHING_CLIPPING"
 
 # Path to the "time-on-bottom" CSV file and column names (adjust as needed)
-csv_path: "C:\\Users\\matt.grossi\\Documents\\gh-repos\\PEM-ACRF-SEFIS-VideoPreProcessing\\_videos\\SEFIS test vids.csv"
+csv_path: "N:\\VIDEO_DATA\\2025_SEFIS_STITCHING_CLIPPING\\SEFIS test vids.csv"
 col_foldername: "foldername"
 col_timebottom: "timebottom"
 
+# Path to log file where processing details and errors will be recorded
+log_file: "N:\\VIDEO_DATA\\2025_SEFIS_STITCHING_CLIPPING\\processing_log.txt"
 
-# PROCESSING SETTINGS
-# -------------------
+# ----- PROCESSING SETTINGS -----
 # These settings control how the videos are processed. Adjust as needed.
 
 # Reprocess mode: If true, existing stitched videos will be overwritten.
@@ -31,11 +31,10 @@ diagnostic_mode: false
 clear_log: false
 
 # Whether to use GPU acceleration (requires compatible ffmpeg build and GPU)
-use_gpu: true
+use_gpu: false
 
 
-# VIDEO PROCESSING UTILITIES (OPTIONAL)
-# -------------------------------------
+# ----- VIDEO PROCESSING UTILITIES (OPTIONAL) -----
 # These should not need to be changed unless you have multiple copies of FFmpeg
 # installed and want to use a specific version.
 ffmpeg_path: "ffmpeg/bin/ffmpeg.exe"
