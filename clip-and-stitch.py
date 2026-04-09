@@ -203,6 +203,8 @@ def process_deployments(config_path):
     config['reprocess'] = config.get('reprocess', False)
     config['diagnostic_mode'] = config.get('diagnostic_mode', False)
     config['use_gpu'] = config.get('use_gpu', False)
+    config['timeout_min'] = config.get('timeout_min', None)
+    timeout = config['timeout_min'] * 60 if config['timeout_min'] else None
 
     # Video quality setting (18 is high quality, 23 is standard)
     config['quality_crf'] = config.get('quality_crf', 18)
@@ -219,12 +221,13 @@ def process_deployments(config_path):
     # Initialize the session in the log file, wiping it clean if desired.
     mode = "w" if config['clear_log'] else "a"
     with open(config['log_file'], mode) as log:
-        log.write(f"{'#'*60}\n")
+        log.write(f"{'#'*80}\n")
         log.write(f"SESSION START: {datetime.now()}\n")
-        log.write(f"CONFIGURATION: {config_path}\n")
+        log.write(f"CONFIGURATION: {config_path}\n\n")
         for key, value in config.items():
-            log.write(f"  {key}: {value}\n")
-        log.write(f"{'#'*60}\n\n")
+            log.write(f"  -> {key}: {value}\n")
+        log.write("\n")
+        log.write(f"{'#'*80}\n\n")
 
     # Load CSV with encoding fallback
     try:
@@ -286,6 +289,7 @@ def process_deployments(config_path):
         video_files.sort(key=get_gopro_sort_key)
 
         # Get file duration from the metadata
+        print(f"\n  > Probing metadata for {len(video_files)} videos in {folder_id}...", flush=True)
         file_data = []
         for f in video_files:
             full_p = os.path.join(folder_path, f)
@@ -303,6 +307,7 @@ def process_deployments(config_path):
         
         # Check the start times and durations of each video to determine which
         # files are needed to stitch together and where to clip partial videos
+        print(f"  > Determining needed files and trim points...", flush=True)
         cumulative_time = 0
         needed_files = []
         for data in file_data:
@@ -479,7 +484,14 @@ def process_deployments(config_path):
         ]
         
         # Run the command and log any errors
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        print(f"  > Clipping and stitching... This may take some time.\n", flush=True)
+        try:
+            # Adding a timeout (e.g., 60 seconds) prevents infinite hangs
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            print(f"\nERROR: ffprobe timed out on {file_path}. Is the network drive disconnected?")
+            # Return dummy data to avoid crashing the whole script
+            return str(datetime.today())
         if result.returncode != 0:
             with open(config['log_file'], "a") as log:
                 log.write(f"ERROR in {folder_id}: {result.stderr}\n")
