@@ -90,7 +90,7 @@ All user options are contained in a configuration YAML file (called `configurati
 |:-----------------|:---------------------------------------------------------|
 `video_extension`  | The file extension for the video files to be processed. Defaults to ".MP4".
 `log_file`         | Path to and name of the log file where processing information will be recorded. Defaults to `./processing-log.txt` (in the present working directory).
-`quality_crf`      | Constant Rate Factor (CRF) for video encoding quality. Lower values mean better quality: 18 is high quality, 23 is standard. Defaults to 23.
+`quality_crf`      | Constant Rate Factor (CRF) for video encoding quality. Lower values mean better quality: 18 is high quality, 23 is standard. Defaults to 10, which, based on trial and error, produces bit rate and file size most similar to those of the original GoPro files.
 `min_gb_required`  | Minimum required free disk space in GB to start processing. Script will warn if available space is below this threshold. Defaults to 10.
 : Additional settings that can be adjusted if needed or as desired. These can be omitted from the configuration file if the default values are acceptable.
 
