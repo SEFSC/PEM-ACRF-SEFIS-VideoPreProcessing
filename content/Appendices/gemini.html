@@ -1268,6 +1268,97 @@ Note
 <li>A server running Linux for batch processing</li>
 </ul>
 <p>…all calculate the “8-minute-on-bottom” start time to the exact same frame. This eliminates “Software Drift” that might occur if different labs used different platform-specific tools to perform the same task.</p>
+</section>
+<section id="prompt-16" class="level3 gray-background">
+<h3 class="anchored" data-anchor-id="prompt-16">Prompt</h3>
+<p>The stitched video is quite a bit smaller in size than expected. Each “chapter” video is just over 4 GB, yet the stitched video is less than 1 GB. Is this due to <code>quality_crf</code>?</p>
+</section>
+<section id="coding-partner-16" class="level3">
+<h3 class="anchored" data-anchor-id="coding-partner-16">Coding partner</h3>
+<p>It is very likely a combination of the <code>quality_crf</code> setting and the fact that you are transitioning from a high-bitrate “capture” format to a more efficient “storage” format. Seeing a <span class="math inline">\(4\)</span> GB file shrink to less than <span class="math inline">\(1\)</span> GB is actually quite common in video post-processing, especially since your script is stripping away data you don’t need.</p>
+<ol type="1">
+<li><strong>The Power of CRF (Constant Rate Factor)</strong></li>
+</ol>
+<p>The <code>quality_crf</code> setting is the primary driver here. * <strong>GoPro Bitrate:</strong> GoPro cameras record at very high bitrates (often <span class="math inline">\(60\)</span>–<span class="math inline">\(100\)</span> Mbps) because the internal processor has to compress video in real-time while the camera is moving, vibrating, and potentially getting hot. To ensure no detail is lost under those “stressful” conditions, the camera “throws” data at the file. * <strong>FFmpeg Efficiency:</strong> When you run <code>libx264</code> (or <code>nvenc</code>) on your computer, the encoder has more time and processing power to be “smart.” At a CRF of <span class="math inline">\(18\)</span>, FFmpeg identifies areas of the frame that don’t need much data (like a static background or murky water) and compresses them heavily, while saving the data for the fish or moving objects. * The Result: You get “visually lossless” quality at a fraction of the original bitrate.</p>
+<ol start="2" type="1">
+<li><strong>Other Factors Reducing File Size</strong></li>
+</ol>
+<p>Beyond the encoder’s efficiency, several other lines in your script are trimming the “fat” from the files: * <strong>The 24-Minute Window:</strong> A standard GoPro chapter (approx. <span class="math inline">\(4\)</span> GB) usually covers about <span class="math inline">\(11\)</span>–<span class="math inline">\(12\)</span> minutes of footage. If you are stitching two chapters to get your <span class="math inline">\(24\)</span>-minute window, you start with roughly <span class="math inline">\(8\)</span> GB of raw data. * <strong>Stripping Audio (<code>-an</code>):</strong> GoPro files contain multiple audio tracks (sometimes stereo + 5.1 surround data). By using the <code>-an</code> flag in your <code>cmd</code> list, you are deleting <span class="math inline">\(24\)</span> minutes of high-bitrate audio data, which can account for hundreds of megabytes. * <strong>NTSC Timing Logic:</strong> Because your script uses specific trim and fps filters to maintain the <span class="math inline">\(29.97\)</span> fps (<span class="math inline">\(30000/1001\)</span>) NTSC (National Television System Committee) standard, it is discarding “junk” frames or overlap that might exist between chapter seams.</p>
+<ol start="3" type="1">
+<li><strong>How to Verify Quality</strong></li>
+</ol>
+<p>If you are worried the quality is too low for your research, you can perform a quick “Eyeball Test”:</p>
+<ol type="1">
+<li>Open the original GoPro file and your stitched file side-by-side.</li>
+<li>Zoom in on a high-detail area (like the scales of a fish or the texture of the sea floor).</li>
+<li>If you see “blockiness” or “pixelation” in the stitched version, change quality_crf in your configurations.yml from <span class="math inline">\(18\)</span> to a lower number like <span class="math inline">\(12\)</span> or <span class="math inline">\(10\)</span>. Note: <span class="math inline">\(0\)</span> is technically “lossless” but will create files larger than the originals.</li>
+</ol>
+</section>
+<section id="prompt-17" class="level3 gray-background">
+<h3 class="anchored" data-anchor-id="prompt-17">Prompt</h3>
+<p>I do not want any video quality loss whatsoever. Audio is not needed, but the final video quality needs to be the same as the original. Is there any information in the extracted metadata that can help with setting <code>crf</code>?</p>
+</section>
+<section id="coding-partner-17" class="level3">
+<h3 class="anchored" data-anchor-id="coding-partner-17">Coding partner</h3>
+<p>To achieve <strong>mathematically lossless</strong> video where the quality is identical to the original, you cannot rely solely on metadata to “guess” a perfect <code>crf</code>. While metadata provides the Bitrate, which tells you how much data the GoPro used, the only way to guarantee zero further loss during re-encoding is to use CRF 0.</p>
+<ol type="1">
+<li><strong>Metadata that influences Quality</strong></li>
+</ol>
+<p>Your <strong>get_video_metadata</strong> function already extracts key information that impacts how the video is reconstructed, but two specific fields are most relevant to quality: * <strong>Bitrate (<code>bit_rate</code>):</strong> This is found in <code>data['format']['bit_rate']</code>. It tells you the total data per second. If your output bitrate is lower than the source, data has been discarded. * <strong>Chroma Subsampling (<code>pix_fmt</code>):</strong> Most GoPros use <code>yuv420p</code>. To maintain quality, the encoder must match this format.</p>
+<ol start="2" type="1">
+<li><strong>The “True Lossless” Solution: CRF 0</strong></li>
+</ol>
+<p>If your end user insists on no quality loss whatsoever, you should change the <code>quality_crf</code> in your <code>configurations.yml</code> to 0. * <strong>CRF 18:</strong> Considered “visually lossless.” The human eye usually cannot tell the difference between this and the original. * <strong>CRF 0:</strong> This is <strong>mathematically lossless</strong> for the <code>libx264</code> encoder. It ensures that every pixel coming out of the GoPro file is preserved exactly in the stitched file.</p>
+<p><strong>Warning:</strong> Using <code>crf: 0</code> will result in file sizes that are likely larger than the original GoPro files. This is because the original files were compressed using the camera’s hardware constraints; a lossless re-encode must store all that data without any of the clever shortcuts the camera used.</p>
+<ol start="3" type="1">
+<li><strong>Comparison of Quality Settings</strong></li>
+</ol>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 18%">
+<col style="width: 30%">
+<col style="width: 22%">
+<col style="width: 30%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Setting</th>
+<th>Quality Level</th>
+<th>File Size</th>
+<th>Best Use Case</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>CRF 0</td>
+<td>Mathematically Lossless</td>
+<td>Extremely Large</td>
+<td>Archival, High-precision AI analysis</td>
+</tr>
+<tr class="even">
+<td>CRF 12-15</td>
+<td>Near-Lossless</td>
+<td>Large</td>
+<td>High-detail benthic surveys</td>
+</tr>
+<tr class="odd">
+<td>CRF 18</td>
+<td>Visually Lossless</td>
+<td>Moderate</td>
+<td>Standard SEFIS survey analysis</td>
+</tr>
+<tr class="even">
+<td>CRF 23</td>
+<td>Standard</td>
+<td>Small</td>
+<td>Quick review or sharing via cloud</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Recommendation</strong></p>
+<p>If the user truly wants “no loss,” update your configurations.yml:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb6" data-file="configurations.yml"><pre class="sourceCode yaml code-with-copy"><code class="sourceCode yaml"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="fu">quality_crf</span><span class="kw">:</span><span class="at"> </span><span class="dv">0</span></span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a><span class="fu">use_gpu</span><span class="kw">:</span><span class="at"> </span><span class="ch">false</span><span class="co">  # Note: NVIDIA's nvenc (GPU) often does not support true CRF 0; use libx264 for perfect losslessness.</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p><em>Edited for brievery.</em></p>
 
 
