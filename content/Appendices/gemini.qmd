@@ -1017,4 +1017,79 @@ By using a single, OS-agnostic Python script, you ensure that:
 
 ...all calculate the "8-minute-on-bottom" start time to the exact same frame. This eliminates "Software Drift" that might occur if different labs used different platform-specific tools to perform the same task.
 
+::: {.gray-background}
+### Prompt
+
+The stitched video is quite a bit smaller in size than expected. Each "chapter" video is just over 4 GB, yet the stitched video is less than 1 GB. Is this due to `quality_crf`?
+:::
+
+### Coding partner
+
+It is very likely a combination of the `quality_crf` setting and the fact that you are transitioning from a high-bitrate "capture" format to a more efficient "storage" format. Seeing a $4$ GB file shrink to less than $1$ GB is actually quite common in video post-processing, especially since your script is stripping away data you don't need.
+
+1. **The Power of CRF (Constant Rate Factor)**
+
+The `quality_crf` setting is the primary driver here.
+* **GoPro Bitrate:** GoPro cameras record at very high bitrates (often $60$–$100$ Mbps) because the internal processor has to compress video in real-time while the camera is moving, vibrating, and potentially getting hot. To ensure no detail is lost under those "stressful" conditions, the camera "throws" data at the file.
+* **FFmpeg Efficiency:** When you run `libx264` (or `nvenc`) on your computer, the encoder has more time and processing power to be "smart." At a CRF of $18$, FFmpeg identifies areas of the frame that don't need much data (like a static background or murky water) and compresses them heavily, while saving the data for the fish or moving objects.
+* The Result: You get "visually lossless" quality at a fraction of the original bitrate.
+
+2. **Other Factors Reducing File Size**
+
+Beyond the encoder's efficiency, several other lines in your script are trimming the "fat" from the files:
+* **The 24-Minute Window:** A standard GoPro chapter (approx. $4$ GB) usually covers about $11$–$12$ minutes of footage. If you are stitching two chapters to get your $24$-minute window, you start with roughly $8$ GB of raw data.
+* **Stripping Audio (`-an`):** GoPro files contain multiple audio tracks (sometimes stereo + 5.1 surround data). By using the `-an` flag in your `cmd` list, you are deleting $24$ minutes of high-bitrate audio data, which can account for hundreds of megabytes.
+* **NTSC Timing Logic:** Because your script uses specific trim and fps filters to maintain the $29.97$ fps ($30000/1001$) NTSC (National Television System Committee) standard, it is discarding "junk" frames or overlap that might exist between chapter seams.
+
+3. **How to Verify Quality**
+
+If you are worried the quality is too low for your research, you can perform a quick "Eyeball Test":
+
+   1. Open the original GoPro file and your stitched file side-by-side.
+   2. Zoom in on a high-detail area (like the scales of a fish or the texture of the sea floor).
+   3. If you see "blockiness" or "pixelation" in the stitched version, change quality_crf in your configurations.yml from $18$ to a lower number like $12$ or $10$. Note: $0$ is technically "lossless" but will create files larger than the originals.
+   
+::: {.gray-background}
+### Prompt
+
+I do not want any video quality loss whatsoever. Audio is not needed, but the final video quality needs to be the same as the original. Is there any information in the extracted metadata that can help with setting `crf`?
+:::
+
+### Coding partner
+
+To achieve **mathematically lossless** video where the quality is identical to the original, you cannot rely solely on metadata to "guess" a perfect `crf`. While metadata provides the Bitrate, which tells you how much data the GoPro used, the only way to guarantee zero further loss during re-encoding is to use CRF 0.
+
+1. **Metadata that influences Quality**
+
+Your **get_video_metadata** function already extracts key information that impacts how the video is reconstructed, but two specific fields are most relevant to quality:
+*  **Bitrate (`bit_rate`):** This is found in `data['format']['bit_rate']`. It tells you the total data per second. If your output bitrate is lower than the source, data has been discarded.
+*  **Chroma Subsampling (`pix_fmt`):** Most GoPros use `yuv420p`. To maintain quality, the encoder must match this format.
+
+2. **The "True Lossless" Solution: CRF 0**
+
+If your end user insists on no quality loss whatsoever, you should change the `quality_crf` in your `configurations.yml` to 0.
+* **CRF 18:** Considered "visually lossless." The human eye usually cannot tell the difference between this and the original.
+* **CRF 0:** This is **mathematically lossless** for the `libx264` encoder. It ensures that every pixel coming out of the GoPro file is preserved exactly in the stitched file.
+
+   **Warning:** Using `crf: 0` will result in file sizes that are likely larger than the original GoPro files. This is because the original files were compressed using the camera's hardware constraints; a lossless re-encode must store all that data without any of the clever shortcuts the camera used.
+
+3. **Comparison of Quality Settings**
+
+| Setting | Quality Level | File Size | Best Use Case |
+|---------|---------------|-----------|---------------|
+| CRF 0   | Mathematically Lossless | Extremely Large | Archival, High-precision AI analysis |
+| CRF 12-15 | Near-Lossless | Large | High-detail benthic surveys |
+| CRF 18 | Visually Lossless | Moderate | Standard SEFIS survey analysis |
+| CRF 23 | Standard | Small | Quick review or sharing via cloud |
+
+**Recommendation**  
+
+If the user truly wants "no loss," update your configurations.yml:
+
+```{.yaml file=configurations.yml}
+quality_crf: 0
+use_gpu: false  # Note: NVIDIA's nvenc (GPU) often does not support true CRF 0; use libx264 for perfect losslessness.
+```
+
+
 *Edited for brievery.*
