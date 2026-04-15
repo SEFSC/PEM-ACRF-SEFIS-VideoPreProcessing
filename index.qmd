@@ -122,8 +122,10 @@ These can be installed from the accompanying `requirements.txt` file. See [Getti
 
 #### Recommendations
 
-* [Git CLI](https://cli.github.com/) (for repository cloning and version control)
-* [Anaconda](https://www.anaconda.com/download) (for virtual environment implementation)
+* [Git CLI](https://cli.github.com/) for repository cloning and version control via command line  
+  **or**  
+  [GitHub Desktop](https://desktop.github.com/) for repository cloning and version control via GUI
+* [Anaconda](https://www.anaconda.com/download) for virtual environment implementation
 
 
 ### Release Notes
