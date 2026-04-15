@@ -1357,8 +1357,13 @@ Note
 </table>
 <p><strong>Recommendation</strong></p>
 <p>If the user truly wants “no loss,” update your configurations.yml:</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb6" data-file="configurations.yml"><pre class="sourceCode yaml code-with-copy"><code class="sourceCode yaml"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="fu">quality_crf</span><span class="kw">:</span><span class="at"> </span><span class="dv">0</span></span>
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>configurations.yml</strong></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb6" data-filename="configurations.yml"><pre class="sourceCode yaml code-with-copy"><code class="sourceCode yaml"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="fu">quality_crf</span><span class="kw">:</span><span class="at"> </span><span class="dv">0</span></span>
 <span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a><span class="fu">use_gpu</span><span class="kw">:</span><span class="at"> </span><span class="ch">false</span><span class="co">  # Note: NVIDIA's nvenc (GPU) often does not support true CRF 0; use libx264 for perfect losslessness.</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</div>
 <p><em>Edited for brievery.</em></p>
 
 
