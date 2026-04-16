@@ -197,22 +197,22 @@ def process_deployments(config_path='configurations.yml'):
     ffprobe_exe = get_ffmpeg_command(config, "ffprobe")
 
     # SETTINGS THAT CAN ALSO BE OVERRIDDEN IN THE YAML CONFIG FILE
-    # Set defaults
-    config['video_extension'] = config.get('video_extension', '.MP4')
-    config['log_file'] = config.get('log_file', 'processing_log.txt')
     config['clear_log'] = config.get('clear_log', False)
-    config['reprocess'] = config.get('reprocess', False)
     config['diagnostic_mode'] = config.get('diagnostic_mode', False)
-    config['use_gpu'] = config.get('use_gpu', False)
+    config['log_file'] = config.get('log_file', 'processing_log.txt')
+    config['video_extension'] = config.get('video_extension', '.MP4')
+    config['reprocess'] = config.get('reprocess', False)
     config['timeout_min'] = config.get('timeout_min', None)
+    config['use_gpu'] = config.get('use_gpu', False)
     
-    # Bug Fix: Ensure timeout multiplication only happens if value is not None
+    # Convert timeout to seconds
     timeout = config['timeout_min'] * 60 if config.get('timeout_min') else None
 
-    # Video quality setting (18 is high quality, 23 is standard)
-    # Default is 10 which, based on trial and error, produces bit rate and file
-    # size most similar to those of the original GoPro files when `use_gpu` is
-    # False.
+    # Video encoding quality. Lower values mean better quality:
+    #   -> 18 is high quality, 23 is standard
+    #   -> 10 with `use_gpu: false` or 11 with `use_gpu: true` produced bit
+    #      rate and file size most similar to those of the original GoPro files
+    #      during trial and error testing. Often machine-dependent.
     config['quality_crf'] = config.get('quality_crf', 10)
     
     # Minimum disk space required to run script (in GB). Script will warn if
@@ -260,13 +260,12 @@ def process_deployments(config_path='configurations.yml'):
         folder_id = str(row[config['col_foldername']]).strip()
         time_bottom_str = str(row[config['col_timebottom']]).strip()
 
-        # Input directory
+        # Input and output directories
         folder_path = os.path.join(config['input_directory'], folder_id)
         if not os.path.exists(folder_path):
             with open(config['log_file'], "a") as log:
                 log.write(f"SKIP: Folder {folder_path} not found.\n")
             continue
-
         output_path = os.path.join(config['output_directory'],
                                    f"{folder_id}{config['video_extension']}")
 
@@ -344,9 +343,9 @@ def process_deployments(config_path='configurations.yml'):
         # 5. FFmpeg COMMAND
         # Trim each file INDIVIDUALLY before stitching:
         #   -i: input media file
+        #   -t: duration of the clip to take (24 mins = 1440 seconds)
         #   -ss: seeks to the start point for the specified file (relative to
         #        the start of the concatenated stream)
-        #   -t: duration of the clip to take (24 mins = 1440 seconds)
         # See https://ffmpeg.org/ffmpeg.html
         input_args = []
         filter_complex_parts = []
@@ -359,7 +358,8 @@ def process_deployments(config_path='configurations.yml'):
             # is included in the trim.
             trim_duration = f_info['t'] + 0.1
 
-            # Trim the file and then reset its clock (setpts) to 0 so the
+            # Trim the video using start time and duration (seconds) and
+            # reset the clock of the trimmed segment (setpts) to 0 so the
             # stitcher sees a clean sequence starting from 0.0s
             trim_label = f"[v{i}]"
             filter_complex_parts.append(
@@ -368,19 +368,15 @@ def process_deployments(config_path='configurations.yml'):
             )
             filter_inputs += trim_label
 
+        # Build the filter string: e.g., `[0:v][1:v]concat=n=2:v=1[outv]`:
+        # Concatenate video (v) from files 0-1 into 1 video from the 2 inputs
         # Force the frame rate (fps=fps={fps}) right after the concat to 
         # prevent NTSC drift during the stitch. 'round=near' prevents frame
         # drops due to NTSC math drift.
         concat_part = f"{filter_inputs}concat=n={len(needed_files)}:v=1,fps=fps={fps}:round=near[outv]"
-        
-        # Join the cleaned segments together
         filter_complex_parts.append(concat_part)
-
-        # Choose encoder based on GPU setting
-        encoder = "h264_nvenc" if config['use_gpu'] else "libx264"
         
-        # Build the filter string: e.g., `[0:v][1:v]concat=n=2:v=1[outv]`:
-        # concatenate video (v) from files 0-1 into 1 video from the 2 inputs
+        # Get fonts to prevent potential crashes on Windows
         if config.get('diagnostic_mode'):
             # Safeguard against missing fonts on Windows systems with
             # OS-specific font selections
@@ -418,6 +414,7 @@ def process_deployments(config_path='configurations.yml'):
         # 6. GENERATE QC TABLE
         cumulative = 0
         table_lines = []
+
         # Header
         table_lines.append(f"\n{'='*81}")
         table_lines.append(f"{'QC SEAM INSPECTION TABLE - Folder: ' + folder_id:^81}")
@@ -455,26 +452,35 @@ def process_deployments(config_path='configurations.yml'):
             print(full_table_str)
 
         # Build execution command
-        #   -y: overwrite output
-        #   -filter_complex: complex filter to trim and concatenate an
-        #       arbitrary number of input files
-        #   -map: select the output from the filter
-        #   -c:v: video codec (coder/decoder) to use for encoding. Depends on
-        #         whether GPU acceleration is enabled.
-        #   -rc: use Variable Bit Rate mode for NVENC
-        #   -crf: constant rate factor; quality setting for the encoder
+        #   -c:v: video codec (coder/decoder) to use for encoding. Value
+        #       depends on whether GPU acceleration is enabled.
+        #   -rc: use Variable Bit Rate mode, allowing encoder to use more data
+        #       for complex scenes (moving fish) and less for static ones
+        #   -cq: "constant quality" setting for GPU encoder. Lower numbers (10)
+        #       prioritize high visual detail. GPU equivalent of CRF.
+        #   -crf: "constant rate factor" quality setting for CPU encoder. Lower
+        #       values (10) prioritize high visual detail. CPU equivalent of CQ
+        #   -b:v: target bitrate for output video. Set to 0 to disable default
+        #       bitrate cap and strictly follow `-cq` settings
+        #   -maxrate: maximum rate to prvent file size from exploding during
+        #       extremely complex frames
+        #   -bufsize: buffer size telling teh encoder how much video to look at
+        #       when deciding how to distribute the bitrate
         #   -preset: encoding preset; higher quality presets take longer to
-        #         encode. Use "p7" for highest quality.
-        #   -cq: constant quantizer; quality setting for NVENC
+        #       encode. Use "p7" for highest quality.
+        #   -y: overwrite output file if it exists without asking permission
+        #   -map: select the output from the filter
         #   -an: exclude audio from new file
         #   -t: duration of the output video (1440 seconds = 24 minutes)
         if config['use_gpu']:
             encoder_args = [
                 "-c:v", "h264_nvenc",
-                "-rc", "vbr",       # Use Variable Bit Rate mode
-                "-cq", str(config['quality_crf']), # NVENC uses -cq, not -crf
-                "-preset", "p7",    # Highest quality preset for NVENC
-            ]
+                "-rc", "vbr",
+                "-cq", str(config['quality_crf']),
+                "-b:v", "0",
+                "-maxrate", "100M",
+                "-bufsize", "100M",
+                "-preset", "p7",            ]
         else:
             encoder_args = [
                 "-c:v", "libx264",
@@ -482,7 +488,6 @@ def process_deployments(config_path='configurations.yml'):
                 "-preset", "medium",
             ]
         
-        # Bug Fix: Removed audio mapping and codecs as they are not needed for no-audio version
         cmd = [
             ffmpeg_exe, "-y"
         ] + input_args + [
@@ -497,10 +502,9 @@ def process_deployments(config_path='configurations.yml'):
         # Run the command and log any errors
         print(f"  > Clipping and stitching... This may take some time.\n", flush=True)
         try:
-            # Adding a timeout prevents infinite hangs
+            # Add a timeout to prevent infinite hangs
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         except subprocess.TimeoutExpired:
-            # Bug Fix: Corrected variable and changed return to continue
             print(f"\nERROR: ffmpeg timed out on {folder_id}. Is the network drive disconnected?")
             continue
             
