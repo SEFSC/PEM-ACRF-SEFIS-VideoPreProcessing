@@ -556,24 +556,24 @@ Note
 </thead>
 <tbody>
 <tr class="odd">
-<td style="text-align: left;"><code>reprocess</code></td>
-<td style="text-align: left;">If true, existing stitched videos of the same name will be overwritten. Otherwise, skips folders where the output file already exists. Defaults to false.</td>
+<td style="text-align: left;"><code>clear_log</code></td>
+<td style="text-align: left;">If true, clears the log file at the start of each run. Otherwise, appends to the existing log file. Defaults to false.</td>
 </tr>
 <tr class="even">
 <td style="text-align: left;"><code>diagnostic_mode</code></td>
 <td style="text-align: left;">If true, prints the video cut times and embeds an authoritative timestamp into the video itself to verify stitching. Defaults to false.</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;"><code>use_gpu</code></td>
-<td style="text-align: left;">Whether to use GPU acceleration, if available. Requires GPU hardware and compatible <code>ffmpeg</code> build (see <a href="#dependencies">below</a>). Defaults to false.</td>
+<td style="text-align: left;"><code>reprocess</code></td>
+<td style="text-align: left;">If true, existing stitched videos of the same name will be overwritten. Otherwise, skips folders where the output file already exists. Defaults to false.</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><code>clear_log</code></td>
-<td style="text-align: left;">If true, clears the log file at the start of each run. Otherwise, appends to the existing log file. Defaults to false.</td>
-</tr>
-<tr class="odd">
 <td style="text-align: left;"><code>timeout_min</code></td>
 <td style="text-align: left;">Maximum time in minutes to try processing a video before giving up. Can be used to prevent hang ups due to bad network connections, but be sure to allow enough time to actually process a video. Defaults to None (no timeout).</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;"><code>use_gpu</code></td>
+<td style="text-align: left;">Whether to use GPU acceleration, if available. Requires GPU hardware and compatible <code>ffmpeg</code> build (see <a href="#dependencies">below</a>). Defaults to false.</td>
 </tr>
 </tbody>
 </table>
@@ -612,20 +612,20 @@ Note
 </thead>
 <tbody>
 <tr class="odd">
-<td style="text-align: left;"><code>video_extension</code></td>
-<td style="text-align: left;">The file extension for the video files to be processed. Defaults to “.MP4”.</td>
-</tr>
-<tr class="even">
 <td style="text-align: left;"><code>log_file</code></td>
 <td style="text-align: left;">Path to and name of the log file where processing information will be recorded. Defaults to <code>./processing-log.txt</code> (in the present working directory).</td>
-</tr>
-<tr class="odd">
-<td style="text-align: left;"><code>quality_crf</code></td>
-<td style="text-align: left;">Constant Rate Factor (CRF) for video encoding quality. Lower values mean better quality: 18 is high quality, 23 is standard. Defaults to 10, which, based on trial and error, produces bit rate and file size most similar to those of the original GoPro files.</td>
 </tr>
 <tr class="even">
 <td style="text-align: left;"><code>min_gb_required</code></td>
 <td style="text-align: left;">Minimum required free disk space in GB to start processing. Script will warn if available space is below this threshold. Defaults to 10.</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;"><code>quality_crf</code></td>
+<td style="text-align: left;">Constant Rate Factor (CRF) for video encoding quality. Lower values mean better quality: 18 is high quality, 23 is standard. 10 with <code>use_gpu: false</code> or 11 with <code>use_gpu: true</code> produced bit rate and file size most similar to those of the original GoPro files during trial and error testing. Often machine (hardware) dependent. Defaults to 10.</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;"><code>video_extension</code></td>
+<td style="text-align: left;">The file extension for the video files to be processed. Defaults to “.MP4”.</td>
 </tr>
 </tbody>
 </table>
