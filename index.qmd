@@ -11,8 +11,10 @@ This is a Python utility used for merging GoPro videos collected during SEFIS vi
 * Video folders are named using a "collection number" convention consisting of a combination of a project code, year, collection, and camera.
 * Each folder is a single deployment of a trap with a camera and contains a board file (a brief video prior to deployment showing metadata information) and a number of underwater video files.
 * A metadata CSV file contains a "time on bottom" timestamp for each unique identifying collection number indicating the elapsed time from when the video files start to when the trap lands on the bottom.
-* The objective is to extract a segment of video **starting exactly 8 minutes** after the trap lands on bottom and **ending 24 minute later**, or 32 minutes after the trap lands on bottom. This involves slicing some videos and stitching relevant segments together.
+* The objective is to extract a segment of video **starting exactly 8 minutes** after the trap lands on bottom (rounded up to the nearest 30 seconds) and **ending 24 minute later**, or 32 minutes after the trap lands on bottom. This involves slicing some videos and stitching relevant segments together.[^1]
 * The new stitched video is named exactly like the folder containing the files (*i.e.*, the collection number).
+
+[^1]: Both of these time windows are user-configurable, if desired. The default values are based on the current science protocol but can be adjusted as needed. See [Options](#options) for more information.
 
 This script does three things:
 
@@ -23,11 +25,11 @@ This script does three things:
 Some key features:
 
 * **Frame-Accurate Seeking:** Uses `FFmpeg` filters to ensure exact millisecond alignment across GoPro chapter seams.
-* **NTSC Correction:** Automatically[^1] handles 29.97 fps (30000/1001) timing to prevent timecode drift in long deployments.
+* **NTSC Correction:** Automatically[^2] handles 29.97 fps (30000/1001) timing to prevent timecode drift in long deployments.
 * **Diagnostic Overlays:** Provides optional burned-in timecode with `HH:MM:SS:FF` format for frame-by-frame verification.
 * **GoPro Logic:** Intelligently sorts chapters (GX01, GX02) to maintain chronological continuity.
 
-[^1]: The frame rate is extracted from the video metadata, rather than being hard-coded into the script, in an effort to make the utility camera-agnostic.
+[^2]: The frame rate is extracted from the video metadata, rather than being hard-coded into the script, in an effort to make the utility camera-agnostic.
 
 An optional diagnostic mode can be used to embed an authoritative video timestamp into the video frames (formatted `HH:MM:SS:FF`) to help find the splice times, since some video software do not preserve the original frame rate or fail to display the full time during playback. This embedded timestamp is fundamentally independent of the timestamp shown in most video players, which is merely a count from the start of the video. A video player would not know, for example, if a bad stitching operation inadvertently skips a frame or chunk of frames. Engaging diagnostic mode will also print out a table of the stitch times for each deployment to the console including where in the original video files the segments were taken. To assess the performance of the script, compare the frames in the new video at and around the stitch times ("NEW VIDEO TIME") to the appropriate clip timestamps in the corresponding source files ("SOURCE TIMESTAMP"). If, for example, the stitch caused the same file to be read twice, the video player clock will keep advancing but the embedded timestamp in the video will reset or stutter. If the stitch is correct, the embedded timestamp will advance monotonically across the stitch.
 
@@ -58,40 +60,42 @@ All user options are contained in a configuration YAML file (called `configurati
 
 | Key              | Description                                              |
 |:-----------------|:---------------------------------------------------------|
-`input_directory`  | Path to parent folder containing subfolders for set of videos. The subfolders should be named according to the collection number (e.g., `DEPLOYMENT_001`), which will be used to name the new video file, and should contain all of the video files for that deployment.
-`output_directory` | Path to folder where the new video file will be saved. The new video will automatically be named according to the collection number (e.g., `DEPLOYMENT_001.MP4`).
-`csv_path`         | Path (including name) of the "time-on-bottom" CSV metadata file. This file should contain entries for each deployment (subfolder) in rows with collection number in one column and "time-on-bottom" in a separate column. All other columns will be ignored. Note that directory and file names are case-sensitive on some operating systems.
-`col_foldername`   | Column name for the column containing the deployment or folder name. Defaults to `foldername` but can be changed here if needed. Case-sensitive.
-`col_timebottom`   | Column name for the column containing the "time-on-bottom" timestamps. Defaults to `timebottom` but can be changed here if needed. Expected format of the timestamps is `HH:MM:SS:FF``.
+`input_directory`  | (str) Path to parent folder containing subfolders for set of videos. The subfolders should be named according to the collection number (e.g., `DEPLOYMENT_001`), which will be used to name the new video file, and should contain all of the video files for that deployment.
+`output_directory` | (str) Path to folder where the new video file will be saved. The new video will automatically be named according to the collection number (e.g., `DEPLOYMENT_001.MP4`).
+`csv_path`         | (str) Path (including name) of the "time-on-bottom" CSV metadata file. This file should contain entries for each deployment (subfolder) in rows with collection number in one column and "time-on-bottom" in a separate column. All other columns will be ignored. Note that directory and file names are case-sensitive on some operating systems.
+`col_foldername`   | (str) Column name for the column containing the deployment or folder name. Defaults to `foldername` but can be changed here if needed. Case-sensitive.
+`col_timebottom`   | (str) Column name for the column containing the "time-on-bottom" timestamps. Defaults to `timebottom` but can be changed here if needed. Expected format of the timestamps is `HH:MM:SS:FF`.
 : Paths and associated settings
 
 <br>
 
 | Key              | Description                                              |
 |:-----------------|:---------------------------------------------------------|
-`clear_log`        | If true, clears the log file at the start of each run. Otherwise, appends to the existing log file. Defaults to false.
-`diagnostic_mode`  | If true, prints the video cut times and embeds an authoritative timestamp into the video itself to verify stitching. Defaults to false.
-`reprocess`        | If true, existing stitched videos of the same name will be overwritten. Otherwise, skips folders where the output file already exists. Defaults to false.
-`timeout_min`      | Maximum time in minutes to try processing a video before giving up. Can be used to prevent hang ups due to bad network connections, but be sure to allow enough time to actually process a video. Defaults to None (no timeout).
-`use_gpu`          | Whether to use GPU acceleration, if available. Requires GPU hardware and compatible `ffmpeg` build (see [below](#dependencies)). Defaults to false. 
+`clear_log`        | (Boolean) If true, clears the log file at the start of each run. Otherwise, appends to the existing log file. Defaults to false.
+`diagnostic_mode`  | (Boolean) If true, prints the video cut times and embeds an authoritative timestamp into the video itself to verify stitching. Defaults to false.
+`reprocess`        | (Boolean) If true, existing stitched videos of the same name will be overwritten. Otherwise, skips folders where the output file already exists. Defaults to false.
+`use_gpu`          | (Boolean) Whether to use GPU acceleration, if available. Requires GPU hardware and compatible `ffmpeg` build (see [below](#dependencies)). Defaults to false. 
 : Processing settings
 
 <br>
 
 | Key              | Description                                              |
 |:-----------------|:---------------------------------------------------------|
-`ffmpeg_path`      | Path to the executable `ffmpeg` utility (see [below](#dependencies)). Defaults to "ffmpeg/bin/ffmpeg.exe".
-`ffprobe_path`     | Path to the executable `ffprobe` utility (see [below](#dependencies)). Defaults to "ffmpeg/bin/ffprobe.exe".
+`ffmpeg_path`      | (str) Path to the executable `ffmpeg` utility (see [below](#dependencies)). Defaults to "ffmpeg/bin/ffmpeg.exe".
+`ffprobe_path`     | (str) Path to the executable `ffprobe` utility (see [below](#dependencies)). Defaults to "ffmpeg/bin/ffprobe.exe".
 : Video processing utilities. These should not need to be changed once set but may vary between computers and users.
 
 <br>
 
-| Key              | Description                                              |
-|:-----------------|:---------------------------------------------------------|
-`log_file`         | Path to and name of the log file where processing information will be recorded. Defaults to `./processing-log.txt` (in the present working directory).
-`min_gb_required`  | Minimum required free disk space in GB to start processing. Script will warn if available space is below this threshold. Defaults to 10.
-`quality_crf`      | Constant Rate Factor (CRF) for video encoding quality. Lower values mean better quality: 18 is high quality, 23 is standard. 10 with `use_gpu: false` or 11 with `use_gpu: true` produced bit rate and file size most similar to those of the original GoPro files during trial and error testing. Often machine (hardware) dependent. Defaults to 10.
-`video_extension`  | The file extension for the video files to be processed. Defaults to ".MP4".
+| Key                | Description                                              |
+|:-------------------|:---------------------------------------------------------|
+`log_file`           | (str) Path to and name of the log file where processing information will be recorded. Defaults to `./processing-log.txt` (in the present working directory).
+`min_gb_required`    | (int) Minimum required free disk space in GB to start processing. Script will warn if available space is below this threshold. Defaults to 10.
+`timeout_min`        | (int) Maximum time in whole minutes to try processing a video before giving up. Can be used to prevent hang ups due to bad network connections, but be sure to allow enough time to actually process a video. Fractional minutes or `MM:SS` not yet supported. Defaults to None (no timeout).
+`preread_time_min`   | (int) Number of whole minutes between the time on the bottom and the start of the extracted video segment. Fractional minutes or `MM:SS` not yet supported. Defaults to 8.
+`quality_crf`        | (int) Constant Rate Factor (CRF) for video encoding quality. Lower values mean better quality: 18 is high quality, 23 is standard. 10 with `use_gpu: false` or 11 with `use_gpu: true` produced bit rate and file size most similar to those of the original GoPro files during trial and error testing. Often machine (hardware) dependent. Defaults to 10.
+`video_duration_min` | (int) Expected duration of the final video in whole minutes. Fractional minutes or `MM:SS` not yet supported. Defaults to 24.
+`video_extension`    | (str) The file extension for the video files to be processed. Defaults to ".MP4".
 : Additional settings that can be adjusted if needed or as desired. These can be omitted from the configuration file if the default values are acceptable.
 
 
