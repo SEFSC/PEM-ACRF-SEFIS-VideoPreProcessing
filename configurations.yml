@@ -33,6 +33,14 @@ clear_log: false
 # Whether to use GPU acceleration (requires compatible ffmpeg build and GPU)
 use_gpu: false
 
+# Video encoding quality. Lower values mean better quality:
+#   -> 18 is high quality, 23 is standard
+#   -> 10 with `use_gpu: false` or 11 with `use_gpu: true` produced bit rate
+#      and file size most similar to those of the original GoPro files during
+#      trial and error testing. Often machine-dependent. Your mileage may vary.
+# Defaults to 10.
+quality_crf: 10
+
 
 # ----- VIDEO PROCESSING UTILITIES (OPTIONAL) -----
 # These should not need to be changed unless you have multiple copies of FFmpeg
