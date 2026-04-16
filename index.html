@@ -468,7 +468,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <li>Video folders are named using a “collection number” convention consisting of a combination of a project code, year, collection, and camera.</li>
 <li>Each folder is a single deployment of a trap with a camera and contains a board file (a brief video prior to deployment showing metadata information) and a number of underwater video files.</li>
 <li>A metadata CSV file contains a “time on bottom” timestamp for each unique identifying collection number indicating the elapsed time from when the video files start to when the trap lands on the bottom.</li>
-<li>The objective is to extract a segment of video <strong>starting exactly 8 minutes</strong> after the trap lands on bottom and <strong>ending 24 minute later</strong>, or 32 minutes after the trap lands on bottom. This involves slicing some videos and stitching relevant segments together.</li>
+<li>The objective is to extract a segment of video <strong>starting exactly 8 minutes</strong> after the trap lands on bottom (rounded up to the nearest 30 seconds) and <strong>ending 24 minute later</strong>, or 32 minutes after the trap lands on bottom. This involves slicing some videos and stitching relevant segments together.<a href="#fn1" class="footnote-ref" id="fnref1" role="doc-noteref"><sup>1</sup></a></li>
 <li>The new stitched video is named exactly like the folder containing the files (<em>i.e.</em>, the collection number).</li>
 </ul>
 <p>This script does three things:</p>
@@ -480,7 +480,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <p>Some key features:</p>
 <ul>
 <li><strong>Frame-Accurate Seeking:</strong> Uses <code>FFmpeg</code> filters to ensure exact millisecond alignment across GoPro chapter seams.</li>
-<li><strong>NTSC Correction:</strong> Automatically<a href="#fn1" class="footnote-ref" id="fnref1" role="doc-noteref"><sup>1</sup></a> handles 29.97 fps (30000/1001) timing to prevent timecode drift in long deployments.</li>
+<li><strong>NTSC Correction:</strong> Automatically<a href="#fn2" class="footnote-ref" id="fnref2" role="doc-noteref"><sup>2</sup></a> handles 29.97 fps (30000/1001) timing to prevent timecode drift in long deployments.</li>
 <li><strong>Diagnostic Overlays:</strong> Provides optional burned-in timecode with <code>HH:MM:SS:FF</code> format for frame-by-frame verification.</li>
 <li><strong>GoPro Logic:</strong> Intelligently sorts chapters (GX01, GX02) to maintain chronological continuity.</li>
 </ul>
@@ -525,23 +525,23 @@ Note
 <tbody>
 <tr class="odd">
 <td style="text-align: left;"><code>input_directory</code></td>
-<td style="text-align: left;">Path to parent folder containing subfolders for set of videos. The subfolders should be named according to the collection number (e.g., <code>DEPLOYMENT_001</code>), which will be used to name the new video file, and should contain all of the video files for that deployment.</td>
+<td style="text-align: left;">(str) Path to parent folder containing subfolders for set of videos. The subfolders should be named according to the collection number (e.g., <code>DEPLOYMENT_001</code>), which will be used to name the new video file, and should contain all of the video files for that deployment.</td>
 </tr>
 <tr class="even">
 <td style="text-align: left;"><code>output_directory</code></td>
-<td style="text-align: left;">Path to folder where the new video file will be saved. The new video will automatically be named according to the collection number (e.g., <code>DEPLOYMENT_001.MP4</code>).</td>
+<td style="text-align: left;">(str) Path to folder where the new video file will be saved. The new video will automatically be named according to the collection number (e.g., <code>DEPLOYMENT_001.MP4</code>).</td>
 </tr>
 <tr class="odd">
 <td style="text-align: left;"><code>csv_path</code></td>
-<td style="text-align: left;">Path (including name) of the “time-on-bottom” CSV metadata file. This file should contain entries for each deployment (subfolder) in rows with collection number in one column and “time-on-bottom” in a separate column. All other columns will be ignored. Note that directory and file names are case-sensitive on some operating systems.</td>
+<td style="text-align: left;">(str) Path (including name) of the “time-on-bottom” CSV metadata file. This file should contain entries for each deployment (subfolder) in rows with collection number in one column and “time-on-bottom” in a separate column. All other columns will be ignored. Note that directory and file names are case-sensitive on some operating systems.</td>
 </tr>
 <tr class="even">
 <td style="text-align: left;"><code>col_foldername</code></td>
-<td style="text-align: left;">Column name for the column containing the deployment or folder name. Defaults to <code>foldername</code> but can be changed here if needed. Case-sensitive.</td>
+<td style="text-align: left;">(str) Column name for the column containing the deployment or folder name. Defaults to <code>foldername</code> but can be changed here if needed. Case-sensitive.</td>
 </tr>
 <tr class="odd">
 <td style="text-align: left;"><code>col_timebottom</code></td>
-<td style="text-align: left;">Column name for the column containing the “time-on-bottom” timestamps. Defaults to <code>timebottom</code> but can be changed here if needed. Expected format of the timestamps is `HH:MM:SS:FF``.</td>
+<td style="text-align: left;">(str) Column name for the column containing the “time-on-bottom” timestamps. Defaults to <code>timebottom</code> but can be changed here if needed. Expected format of the timestamps is <code>HH:MM:SS:FF</code>.</td>
 </tr>
 </tbody>
 </table>
@@ -557,23 +557,19 @@ Note
 <tbody>
 <tr class="odd">
 <td style="text-align: left;"><code>clear_log</code></td>
-<td style="text-align: left;">If true, clears the log file at the start of each run. Otherwise, appends to the existing log file. Defaults to false.</td>
+<td style="text-align: left;">(Boolean) If true, clears the log file at the start of each run. Otherwise, appends to the existing log file. Defaults to false.</td>
 </tr>
 <tr class="even">
 <td style="text-align: left;"><code>diagnostic_mode</code></td>
-<td style="text-align: left;">If true, prints the video cut times and embeds an authoritative timestamp into the video itself to verify stitching. Defaults to false.</td>
+<td style="text-align: left;">(Boolean) If true, prints the video cut times and embeds an authoritative timestamp into the video itself to verify stitching. Defaults to false.</td>
 </tr>
 <tr class="odd">
 <td style="text-align: left;"><code>reprocess</code></td>
-<td style="text-align: left;">If true, existing stitched videos of the same name will be overwritten. Otherwise, skips folders where the output file already exists. Defaults to false.</td>
+<td style="text-align: left;">(Boolean) If true, existing stitched videos of the same name will be overwritten. Otherwise, skips folders where the output file already exists. Defaults to false.</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><code>timeout_min</code></td>
-<td style="text-align: left;">Maximum time in minutes to try processing a video before giving up. Can be used to prevent hang ups due to bad network connections, but be sure to allow enough time to actually process a video. Defaults to None (no timeout).</td>
-</tr>
-<tr class="odd">
 <td style="text-align: left;"><code>use_gpu</code></td>
-<td style="text-align: left;">Whether to use GPU acceleration, if available. Requires GPU hardware and compatible <code>ffmpeg</code> build (see <a href="#dependencies">below</a>). Defaults to false.</td>
+<td style="text-align: left;">(Boolean) Whether to use GPU acceleration, if available. Requires GPU hardware and compatible <code>ffmpeg</code> build (see <a href="#dependencies">below</a>). Defaults to false.</td>
 </tr>
 </tbody>
 </table>
@@ -589,11 +585,11 @@ Note
 <tbody>
 <tr class="odd">
 <td style="text-align: left;"><code>ffmpeg_path</code></td>
-<td style="text-align: left;">Path to the executable <code>ffmpeg</code> utility (see <a href="#dependencies">below</a>). Defaults to “ffmpeg/bin/ffmpeg.exe”.</td>
+<td style="text-align: left;">(str) Path to the executable <code>ffmpeg</code> utility (see <a href="#dependencies">below</a>). Defaults to “ffmpeg/bin/ffmpeg.exe”.</td>
 </tr>
 <tr class="even">
 <td style="text-align: left;"><code>ffprobe_path</code></td>
-<td style="text-align: left;">Path to the executable <code>ffprobe</code> utility (see <a href="#dependencies">below</a>). Defaults to “ffmpeg/bin/ffprobe.exe”.</td>
+<td style="text-align: left;">(str) Path to the executable <code>ffprobe</code> utility (see <a href="#dependencies">below</a>). Defaults to “ffmpeg/bin/ffprobe.exe”.</td>
 </tr>
 </tbody>
 </table>
@@ -601,8 +597,8 @@ Note
 <table class="caption-top table">
 <caption>Additional settings that can be adjusted if needed or as desired. These can be omitted from the configuration file if the default values are acceptable.</caption>
 <colgroup>
-<col style="width: 23%">
-<col style="width: 76%">
+<col style="width: 25%">
+<col style="width: 74%">
 </colgroup>
 <thead>
 <tr class="header">
@@ -613,19 +609,31 @@ Note
 <tbody>
 <tr class="odd">
 <td style="text-align: left;"><code>log_file</code></td>
-<td style="text-align: left;">Path to and name of the log file where processing information will be recorded. Defaults to <code>./processing-log.txt</code> (in the present working directory).</td>
+<td style="text-align: left;">(str) Path to and name of the log file where processing information will be recorded. Defaults to <code>./processing-log.txt</code> (in the present working directory).</td>
 </tr>
 <tr class="even">
 <td style="text-align: left;"><code>min_gb_required</code></td>
-<td style="text-align: left;">Minimum required free disk space in GB to start processing. Script will warn if available space is below this threshold. Defaults to 10.</td>
+<td style="text-align: left;">(int) Minimum required free disk space in GB to start processing. Script will warn if available space is below this threshold. Defaults to 10.</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;"><code>timeout_min</code></td>
+<td style="text-align: left;">(int) Maximum time in whole minutes to try processing a video before giving up. Can be used to prevent hang ups due to bad network connections, but be sure to allow enough time to actually process a video. Fractional minutes or <code>MM:SS</code> not yet supported. Defaults to None (no timeout).</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;"><code>preread_time_min</code></td>
+<td style="text-align: left;">(int) Number of whole minutes between the time on the bottom and the start of the extracted video segment. Fractional minutes or <code>MM:SS</code> not yet supported. Defaults to 8.</td>
 </tr>
 <tr class="odd">
 <td style="text-align: left;"><code>quality_crf</code></td>
-<td style="text-align: left;">Constant Rate Factor (CRF) for video encoding quality. Lower values mean better quality: 18 is high quality, 23 is standard. 10 with <code>use_gpu: false</code> or 11 with <code>use_gpu: true</code> produced bit rate and file size most similar to those of the original GoPro files during trial and error testing. Often machine (hardware) dependent. Defaults to 10.</td>
+<td style="text-align: left;">(int) Constant Rate Factor (CRF) for video encoding quality. Lower values mean better quality: 18 is high quality, 23 is standard. 10 with <code>use_gpu: false</code> or 11 with <code>use_gpu: true</code> produced bit rate and file size most similar to those of the original GoPro files during trial and error testing. Often machine (hardware) dependent. Defaults to 10.</td>
 </tr>
 <tr class="even">
+<td style="text-align: left;"><code>video_duration_min</code></td>
+<td style="text-align: left;">(int) Expected duration of the final video in whole minutes. Fractional minutes or <code>MM:SS</code> not yet supported. Defaults to 24.</td>
+</tr>
+<tr class="odd">
 <td style="text-align: left;"><code>video_extension</code></td>
-<td style="text-align: left;">The file extension for the video files to be processed. Defaults to “.MP4”.</td>
+<td style="text-align: left;">(str) The file extension for the video files to be processed. Defaults to “.MP4”.</td>
 </tr>
 </tbody>
 </table>
@@ -711,7 +719,8 @@ Note
 <div id="quarto-appendix" class="default"><section id="footnotes" class="footnotes footnotes-end-of-document" role="doc-endnotes"><h2 class="anchored quarto-appendix-heading">Footnotes</h2>
 
 <ol>
-<li id="fn1"><p>The frame rate is extracted from the video metadata, rather than being hard-coded into the script, in an effort to make the utility camera-agnostic.<a href="#fnref1" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn1"><p>Both of these time windows are user-configurable, if desired. The default values are based on the current science protocol but can be adjusted as needed. See <a href="#options">Options</a> for more information.<a href="#fnref1" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn2"><p>The frame rate is extracted from the video metadata, rather than being hard-coded into the script, in an effort to make the utility camera-agnostic.<a href="#fnref2" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
 </ol>
 </section></div></main> <!-- /main -->
 <script id="quarto-html-after-body" type="application/javascript">
