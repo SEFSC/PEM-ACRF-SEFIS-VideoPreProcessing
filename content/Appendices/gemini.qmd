@@ -1092,4 +1092,4 @@ use_gpu: false  # Note: NVIDIA's nvenc (GPU) often does not support true CRF 0; 
 ```
 
 
-*Edited for brievery.*
+*Edited for brevity.*
