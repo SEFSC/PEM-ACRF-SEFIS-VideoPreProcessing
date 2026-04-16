@@ -14,7 +14,7 @@ A `configurations.yml` file is an easy way to control tool behavior as well as k
 
 These and other configuration options are detailed [in the docs](../index.qmd#options).
 
-The configuration file is a YAML file structured as `key: value` pairs. The order in which these entries are presented in the file does not matter, but [all keys need to be included and match exactly](../index.qmd#options) as expected (unless otherwise noted. For example:
+The configuration file is a YAML file structured as `key: value` pairs. The order in which these entries are presented in the file does not matter, but [all keys need to be included and match exactly](../index.qmd#options) as expected unless otherwise noted. For example:
 
 ```{.yaml filename="configurations.yml"}
 # ----- PATH SETTINGS -----
