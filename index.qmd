@@ -69,11 +69,11 @@ All user options are contained in a configuration YAML file (called `configurati
 
 | Key              | Description                                              |
 |:-----------------|:---------------------------------------------------------|
-`reprocess`        | If true, existing stitched videos of the same name will be overwritten. Otherwise, skips folders where the output file already exists. Defaults to false.
-`diagnostic_mode`  | If true, prints the video cut times and embeds an authoritative timestamp into the video itself to verify stitching. Defaults to false.
-`use_gpu`          | Whether to use GPU acceleration, if available. Requires GPU hardware and compatible `ffmpeg` build (see [below](#dependencies)). Defaults to false. 
 `clear_log`        | If true, clears the log file at the start of each run. Otherwise, appends to the existing log file. Defaults to false.
+`diagnostic_mode`  | If true, prints the video cut times and embeds an authoritative timestamp into the video itself to verify stitching. Defaults to false.
+`reprocess`        | If true, existing stitched videos of the same name will be overwritten. Otherwise, skips folders where the output file already exists. Defaults to false.
 `timeout_min`      | Maximum time in minutes to try processing a video before giving up. Can be used to prevent hang ups due to bad network connections, but be sure to allow enough time to actually process a video. Defaults to None (no timeout).
+`use_gpu`          | Whether to use GPU acceleration, if available. Requires GPU hardware and compatible `ffmpeg` build (see [below](#dependencies)). Defaults to false. 
 : Processing settings
 
 <br>
@@ -88,10 +88,10 @@ All user options are contained in a configuration YAML file (called `configurati
 
 | Key              | Description                                              |
 |:-----------------|:---------------------------------------------------------|
-`video_extension`  | The file extension for the video files to be processed. Defaults to ".MP4".
 `log_file`         | Path to and name of the log file where processing information will be recorded. Defaults to `./processing-log.txt` (in the present working directory).
-`quality_crf`      | Constant Rate Factor (CRF) for video encoding quality. Lower values mean better quality: 18 is high quality, 23 is standard. Defaults to 10, which, based on trial and error, produces bit rate and file size most similar to those of the original GoPro files.
 `min_gb_required`  | Minimum required free disk space in GB to start processing. Script will warn if available space is below this threshold. Defaults to 10.
+`quality_crf`      | Constant Rate Factor (CRF) for video encoding quality. Lower values mean better quality: 18 is high quality, 23 is standard. 10 with `use_gpu: false` or 11 with `use_gpu: true` produced bit rate and file size most similar to those of the original GoPro files during trial and error testing. Often machine (hardware) dependent. Defaults to 10.
+`video_extension`  | The file extension for the video files to be processed. Defaults to ".MP4".
 : Additional settings that can be adjusted if needed or as desired. These can be omitted from the configuration file if the default values are acceptable.
 
 

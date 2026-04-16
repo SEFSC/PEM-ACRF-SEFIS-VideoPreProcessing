@@ -25,9 +25,10 @@ col_foldername: "foldername"
 col_timebottom: "timebottom"
 
 # ----- PROCESSING SETTINGS -----
-reprocess: false
-diagnostic_mode: false
 clear_log: false
+diagnostic_mode: false
+reprocess: false
+quality_crf: 10
 use_gpu: false
 
 # ----- VIDEO PROCESSING UTILITIES (OPTIONAL) -----
