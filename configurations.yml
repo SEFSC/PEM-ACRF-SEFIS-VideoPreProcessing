@@ -18,22 +18,24 @@ log_file: "N:\\VIDEO_DATA\\2025_SEFIS_STITCHING_CLIPPING\\processing_log.txt"
 # ----- PROCESSING SETTINGS -----
 # These settings control how the videos are processed. Adjust as needed.
 
-# Reprocess mode: If true, existing stitched videos will be overwritten.
-# Otherwise, skips folders where the output file already exists.
+# Reprocess mode (Boolean): If true, any existing stitched videos will be
+# overwritten. Otherwise, skips folders where the output file already exists.
+# Defaults to false.
 reprocess: false
 
-# Diagnostic mode: If true, prints the video cut times to the console and
-# embeds a timestamp into the video.
+# Diagnostic mode (Boolean): If true, prints the video cut times to the console
+# and embeds a timestamp into the video. Defaults to false.
 diagnostic_mode: false
 
-# Clear log: If true, clears the log file at the start of each run. Otherwise,
-# appends to the existing log. Defaults to false.
+# Clear log (Boolean): If true, clears the log file at the start of each run.
+# Otherwise, appends to the existing log. Defaults to false.
 clear_log: false
 
-# Whether to use GPU acceleration (requires compatible ffmpeg build and GPU)
+# GPU (Boolean): Whether to use GPU acceleration (requires compatible ffmpeg
+# build and GPU) Defaults to false.
 use_gpu: false
 
-# Video encoding quality. Lower values mean better quality:
+# Video encoding quality (int). Lower values mean better quality:
 #   -> 18 is high quality, 23 is standard
 #   -> 10 with `use_gpu: false` or 11 with `use_gpu: true` produced bit rate
 #      and file size most similar to those of the original GoPro files during
