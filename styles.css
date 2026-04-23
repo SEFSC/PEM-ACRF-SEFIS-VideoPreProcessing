@@ -3,3 +3,9 @@
   padding: 3px;
   border-radius: 3px;
 }
+
+.centered {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}

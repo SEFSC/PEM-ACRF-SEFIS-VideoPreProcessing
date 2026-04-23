@@ -8,6 +8,7 @@ format:
     theme:
       light: [cosmo, theme/theme.scss] 
       dark: [cosmo, theme/theme-dark.scss]
+    css: styles.css
 
 metadata-files:
   - theme/_website.yml
