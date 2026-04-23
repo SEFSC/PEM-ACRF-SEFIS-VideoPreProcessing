@@ -68,7 +68,7 @@ def load_config(config_path='configurations.yml'):
         return yaml.safe_load(f)
 
 def get_video_metadata(file_path, ffprobe_path):
-    """Uses ffprobe to get internal creation time and duration of a video file.
+    """Uses ffprobe to get internal metadata of a video file.
     
     Arguments
     ---------
@@ -82,6 +82,9 @@ def get_video_metadata(file_path, ffprobe_path):
         creation_time: str, creation time of the video
             (e.g., "2024-01-01T12:00:00Z")
         fps: float, frames per second of the video
+        bit_rate: int, bit rate of the video
+        width: int, width of the video in pixels
+        height: int, height of the video in pixels
     """
     # ffprobe Command
     #   -v: verbose level (quiet suppresses output)
@@ -101,11 +104,26 @@ def get_video_metadata(file_path, ffprobe_path):
     # GoPro creation_time is usually in format tags
     creation_time = data['format'].get('tags', {})\
                                   .get('creation_time', '1970-01-01T00:00:00Z')
+    # Get bit rate to calculate file size (bytes) if needed for logging or QC
+    bit_rate = int(data['format']['bit_rate'])
+    
+    # Extract width and height from video stream
+    width = 0
+    height = 0
+    for stream in data.get('streams', []):
+        if stream.get('codec_type') == 'video':
+            width = int(stream.get('width'))
+            height = int(stream.get('height'))
+            break
     
     # Extract FPS from the video stream metadata
     fps = get_fps_from_metadata(metadata=data)
 
-    return duration, creation_time, fps
+    return duration, creation_time, fps, bit_rate, width, height
+
+def calculate_file_size(duration, bit_rate):
+    """Calculates the file size in bytes based on duration and bit rate."""
+    return int((duration * bit_rate) / 8)
 
 def get_fps_from_metadata(metadata):
     """
@@ -323,11 +341,11 @@ def process_deployments(config_path='configurations.yml'):
         file_data = []
         for f in video_files:
             full_p = os.path.join(folder_path, f)
-            dur, _, fps = get_video_metadata(
+            dur, _, fps, br, w, h = get_video_metadata(
                 file_path=full_p,
                 ffprobe_path=ffprobe_exe
                 )
-            file_data.append({'path': full_p, 'duration': dur, 'fps': fps})
+            file_data.append({'path': full_p, 'duration': dur, 'fps': fps, 'bit_rate': br, 'width': w, 'height': h})
 
         # 4. CALCULATE TIMELINE
         # Start time is `preread_time_min` minutes (default 8) from the time on
@@ -339,7 +357,7 @@ def process_deployments(config_path='configurations.yml'):
         
         # Check the start times and durations of each video to determine which
         # files are needed to stitch together and where to clip partial videos
-        print(f"  > Determining needed files and trim points...", flush=True)
+        print("  > Determining needed files and trim points...\n", flush=True)
         cumulative_time = 0
         needed_files = []
         for data in file_data:
@@ -351,10 +369,19 @@ def process_deployments(config_path='configurations.yml'):
                 # Store the relative start/end for THIS specific file
                 rel_start = max(0, start_seconds - file_start)
                 rel_end = min(data['duration'], end_seconds - file_start)
+
+                # Calculate BPP for the current chapter
+                bpp = data['bit_rate'] / (data['width'] * data['height'] * data['fps'])
+                
                 needed_files.append({
                     'path': data['path'], 
                     'ss': rel_start, 
-                    't': rel_end - rel_start
+                    't': rel_end - rel_start,
+                    'size': calculate_file_size(rel_end - rel_start, data['bit_rate']),
+                    'bpp': bpp,
+                    'width': data['width'],
+                    'height': data['height'],
+                    'fps': data['fps']
                 })
             cumulative_time = file_end
 
@@ -371,10 +398,16 @@ def process_deployments(config_path='configurations.yml'):
         #   -ss: seeks to the start point for the specified file (relative to
         #        the start of the concatenated stream)
         # See https://ffmpeg.org/ffmpeg.html
+        cumulative_size = 0
+        cumulative_bpp = 0
         input_args = []
         filter_complex_parts = []
         filter_inputs = ""
         for i, f_info in enumerate(needed_files):
+            # Update cumulative statistics
+            cumulative_size += f_info['size']
+            cumulative_bpp += f_info['bpp']
+
             # Add the input file normally
             input_args.extend(["-i", f_info['path']])
 
@@ -391,6 +424,16 @@ def process_deployments(config_path='configurations.yml'):
                 f"setpts=PTS-STARTPTS{trim_label}"
             )
             filter_inputs += trim_label
+        print(f"  > Estimated size of stitched video without quality loss: {cumulative_size / (2**30):.2f} GB\n", flush=True)
+        print("    This utility uses a `libx264` (CPU) encoder that is generally more efficient than the GoPro's internal hardware.", flush=True)    
+        print("    This means you will often find that an output file with a lower bitrate than the original actually contains the", flush=True)
+        print("    same amount of visual information. Your target shouldn't necessarily be an identical file size, but rather a file", flush=True)
+        print('    file size that stays within 80-90% of the original and a BPP within 80% of the original in order to maintain', flush=True)
+        print('    "visually lossless" quality.\n', flush=True)
+        
+        # Calculate average bits per pixel from original videos
+        avg_bpp = cumulative_bpp / len(needed_files)
+        print(f"  > Average Information Density (BPP) of original videos: {avg_bpp:.4f}", flush=True)
 
         # Build the filter string: e.g., `[0:v][1:v]concat=n=2:v=1[outv]`:
         # Concatenate video (v) from files 0-1 into 1 video from the 2 inputs
@@ -440,11 +483,11 @@ def process_deployments(config_path='configurations.yml'):
         table_lines = []
 
         # Header
-        table_lines.append(f"\n{'='*81}")
-        table_lines.append(f"{'QC SEAM INSPECTION TABLE - Folder: ' + folder_id:^81}")
-        table_lines.append(f"{'='*81}")
-        table_lines.append(f"{'NEW VIDEO TIME':<18} | {'ACTION':<15} | {'SOURCE FILE':<20} | {'SOURCE TIMESTAMP'}")
-        table_lines.append(f"{'-'*18}-|{'-'*17}|{'-'*22}|{'-'*20}")
+        table_lines.append(f"\n{'='*80}")
+        table_lines.append(f"{'QC SEAM INSPECTION TABLE - Folder: ' + folder_id:^80}")
+        table_lines.append(f"{'='*80}")
+        table_lines.append(f"{'NEW VIDEO TIME':<18} | {'ACTION':<17} | {'SOURCE FILE':<17} | {'SOURCE TIMESTAMP'}")
+        table_lines.append(f"{'-'*19}|{'-'*19}|{'-'*19}|{'-'*20}")
 
         # Content
         for i, segment in enumerate(needed_files):
@@ -452,19 +495,20 @@ def process_deployments(config_path='configurations.yml'):
             start_ts = seconds_to_timestamp(cumulative, fps)
             source_start = seconds_to_timestamp(segment['ss'], fps)
             
-            table_lines.append(f"{start_ts:<18} | START SEGMENT   | {file_name:<20} | {source_start}")
+            table_lines.append(f"{start_ts:<18} | START SEGMENT     | {file_name:<17} | {source_start}")
             
             cumulative += segment['t']
             end_ts = seconds_to_timestamp(cumulative, fps)
             source_end = seconds_to_timestamp(segment['ss'] + segment['t'], fps)
             
             if i < len(needed_files) - 1:
-                table_lines.append(f"{end_ts:<18} | SEAM / STITCH   | {file_name:<20} | {source_end}")
-                table_lines.append(f"{' '*18} |      vvv        | {' '*20} |")
+                table_lines.append(f"{end_ts:<18} | SEAM / STITCH     | {file_name:<17} | {source_end}")
+                table_lines.append(f"{' '*18} |        |||        | {' '*17} |")
+                table_lines.append(f"{' '*18} |        vvv        | {' '*17} |")
             else:
-                table_lines.append(f"{end_ts:<18} | VIDEO END       | {file_name:<20} | {source_end}")
+                table_lines.append(f"{end_ts:<18} | VIDEO END         | {file_name:<17} | {source_end}")
 
-        table_lines.append(f"{'='*81}\n")
+        table_lines.append(f"{'='*80}\n")
         full_table_str = "\n".join(table_lines)
 
         # Write the table to the log file
@@ -486,7 +530,7 @@ def process_deployments(config_path='configurations.yml'):
         #       values (10) prioritize high visual detail. CPU equivalent of CQ
         #   -b:v: target bitrate for output video. Set to 0 to disable default
         #       bitrate cap and strictly follow `-cq` settings
-        #   -maxrate: maximum rate to prvent file size from exploding during
+        #   -maxrate: maximum rate to prevent file size from exploding during
         #       extremely complex frames
         #   -bufsize: buffer size telling teh encoder how much video to look at
         #       when deciding how to distribute the bitrate
@@ -504,7 +548,8 @@ def process_deployments(config_path='configurations.yml'):
                 "-b:v", "0",
                 "-maxrate", "100M",
                 "-bufsize", "100M",
-                "-preset", "p7",            ]
+                "-preset", "p7",
+            ]
         else:
             encoder_args = [
                 "-c:v", "libx264",
@@ -524,7 +569,7 @@ def process_deployments(config_path='configurations.yml'):
         ]
 
         # Run the command and log any errors
-        print(f"  > Clipping and stitching... This may take some time.\n", flush=True)
+        print("  > Clipping and stitching... This may take some time.\n", flush=True)
         try:
             # Add a timeout to prevent infinite hangs
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
@@ -536,13 +581,65 @@ def process_deployments(config_path='configurations.yml'):
             with open(config['log_file'], "a") as log:
                 log.write(f"ERROR in {folder_id}: {result.stderr}\n")
         
-        # Calculate and print elapsed time
-        iter_duration = time.perf_counter() - iter_start
-        if iter_duration > 60:
-            print(f"  > Created {f"{folder_id}{config['video_extension']}"} in {iter_duration/60:.2f} minutes.\n", flush=True)
+        # Calculate actual metrics for the final video
+        if os.path.exists(output_path):
+            actual_size = os.path.getsize(output_path)
+            # Use video_duration_sec (default 1440) to find the actual bit rate
+            actual_bitrate = (actual_size * 8) / video_duration_sec
+            # Calculate BPP for the output file based on source resolution/fps
+            actual_bpp = actual_bitrate / (needed_files[0]['width'] * needed_files[0]['height'] * needed_files[0]['fps'])
         else:
-            print(f"  > Created {f"{folder_id}{config['video_extension']}"} in {iter_duration:.2f} seconds.\n", flush=True)
+            actual_size = 0
+            actual_bpp = 0
+
+        # Calculate and print elapsed time with final QC metrics
+        iter_duration = time.perf_counter() - iter_start
+        final_info = f"Size: {actual_size / (2**30):.2f} GB | BPP: {actual_bpp:.4f}"
+        if iter_duration > 60:
+            print(f"  > Created {f"{folder_id}{config['video_extension']}"} in {iter_duration/60:.2f} minutes.", flush=True)
+        else:
+            print(f"  > Created {f"{folder_id}{config['video_extension']}"} in {iter_duration:.2f} seconds.", flush=True)
+        print(f"    {final_info}\n", flush=True)
     
+        # Check expectations
+        is_bpp_ideal_80 = avg_bpp * 0.80 <= actual_bpp <= avg_bpp * 1.20
+        is_size_ideal_80 = cumulative_size * 0.80 <= actual_size <= cumulative_size * 1.20
+        is_bpp_ideal_90 = avg_bpp * 0.90 <= actual_bpp <= avg_bpp * 1.10
+        is_size_ideal_90 = cumulative_size * 0.90 <= actual_size <= cumulative_size * 1.10
+
+        # Add to log file
+        with open(config['log_file'], "a") as log:
+            log.write(f"SUMMARY OF FOLDER {folder_id}:\n")
+            log.write(f"    Average bits per pixel (BPP) of original videos: {avg_bpp:.4f}\n")
+            log.write(f"    Estimated size of output video without visual quality loss: {cumulative_size / (2**30):.2f} GB\n\n")
+            log.write(' '*30 + '* '*10 + '\n\n')
+            log.write(f"    Output video: {final_info}\n\n")
+            log.write(f"    -> Within 80% of original average BPP:  {'YES' if is_bpp_ideal_80 else 'NO   X'}\n")
+            log.write(f"    -> Within 80% of estimated file size:   {'YES' if is_size_ideal_80 else 'NO   X'}\n")
+            log.write(f"    -> Within 90% of original average BPP:  {'YES' if is_bpp_ideal_90 else 'NO   X'}\n")
+            log.write(f"    -> Within 90% of estimated file size:   {'YES' if is_size_ideal_90 else 'NO   X'}\n\n")
+
+        if not all([is_bpp_ideal_90, is_size_ideal_90]):
+            with open(config['log_file'], "a") as log:
+                log.write("    WARNING: Output video is NOT within 90% of the original BPP and/or file\n")
+                log.write("             size. Consider adjusting `quality_crf` as needed to minimize\n")
+                log.write("             quality loss (too small; decrease `quality_crf`) or wasted space\n")
+                log.write("             (too large; increase `quality_crf`).\n\n")
+            print("    WARNING: Output video is NOT within 90% of the original BPP and/or file", flush=True)
+            print("             size. Consider adjusting `quality_crf` as needed to minimize", flush=True)
+            print("             quality loss (too small; decrease `quality_crf`) or wasted space", flush=True)
+            print("             (too large; increase `quality_crf`).\n", flush=True)
+        elif not all([is_bpp_ideal_80, is_size_ideal_80]):
+            with open(config['log_file'], "a") as log:
+                log.write("    WARNING: Output video is NOT within 80% of the original BPP and/or file\n")
+                log.write("             size. Consider adjusting `quality_crf` as needed to minimize\n")
+                log.write("             quality loss (too small; decrease `quality_crf`) or wasted space\n")
+                log.write("             (too large; increase `quality_crf`).\n")
+            print("    WARNING: Output video is NOT within 80% of the original BPP and/or file", flush=True)
+            print("             size. Consider adjusting `quality_crf` as needed to minimize", flush=True)
+            print("             quality loss (too small; decrease `quality_crf`) or wasted space", flush=True)
+            print("             (too large; increase `quality_crf`).\n", flush=True)
+
     # Add space to end of log file for readability between runs
     with open(config['log_file'], "a") as log:
         log.write("\n\n\n")
