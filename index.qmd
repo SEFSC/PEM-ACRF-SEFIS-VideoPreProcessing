@@ -113,7 +113,7 @@ This project requires the following software and libraries:
 
 * [**Python**](https://www.python.org/downloads/) >= 3.14
 
-  Be sure to check the box to add Python to your system PATH during installation, or [add it manually](https://realpython.com/add-python-to-path/) yourself after installation. This will allow you to run Python from the command line and ensure that the utility can find the Python executable when running.
+  Be sure to check the box to add Python to your system PATH during installation, or [add it manually](https://realpython.com/add-python-to-path/) yourself after installation. This will allow you to run Python from the command line and ensure that the utility can find the Python executable when running. On Windows, you may also need to [turn off app execution aliases related to Python](https://stackoverflow.com/questions/65348890/python-was-not-found-run-without-arguments-to-install-from-the-microsoft-store) (*e.g.*, `python.exe', `python3.exe`.)
 
 * **`ffmpeg` and `ffprobe`** >= 6.1
 
