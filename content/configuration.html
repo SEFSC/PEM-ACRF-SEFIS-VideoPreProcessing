@@ -458,7 +458,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 </header>
 
 
-<p>A <code>configurations.yml</code> file is an easy way to control tool behavior as well as keep a record of the settings used each time. The most important settings in this file to pay attention to are:</p>
+<p>A <code>configurations.yml</code> file is an easy way to control tool behavior as well as keep a record of the settings used each time. A template, called <code>configurations-template.yml</code>, is provided in the repository. Make a copy of this file and rename it to avoid overwriting the template. The most important settings in this file to pay attention to are:</p>
 <ol type="1">
 <li>The directory containing the videos to process</li>
 <li>The directory containing the CSV metadata file and the relevant column headers</li>
@@ -488,6 +488,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <span id="cb1-16"><a href="#cb1-16" aria-hidden="true" tabindex="-1"></a><span class="fu">ffmpeg_path</span><span class="kw">:</span><span class="at"> </span><span class="st">"ffmpeg/bin/ffmpeg.exe"</span></span>
 <span id="cb1-17"><a href="#cb1-17" aria-hidden="true" tabindex="-1"></a><span class="fu">ffprobe_path</span><span class="kw">:</span><span class="at"> </span><span class="st">"ffmpeg/bin/ffprobe.exe"</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </div>
+<p>It is recommended to <a href="https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/about-branches">create a new branch</a> for any changes or experiments, including creating and modifying configuration files. This allows you to work without affecting the main branch and minimize version conflicts in the future.</p>
 <div class="callout callout-style-default callout-tip callout-titled" title="A note on reproducibility">
 <div class="callout-header d-flex align-content-center">
 <div class="callout-icon-container">
