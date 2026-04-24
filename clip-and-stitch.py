@@ -246,13 +246,6 @@ def process_deployments(config_path='configurations.yml'):
     preread_time_sec = int(config['preread_time_min']) * 60
     video_duration_sec = int(config['video_duration_min']) * 60
 
-    # Video encoding quality. Lower values mean better quality:
-    #   -> 18 is high quality, 23 is standard
-    #   -> 10 with `use_gpu: false` or 11 with `use_gpu: true` produced bit
-    #      rate and file size most similar to those of the original GoPro files
-    #      during trial and error testing. Often machine-dependent.
-    config['quality_crf'] = config.get('quality_crf', 10)
-    
     # Minimum disk space required to run script (in GB). Script will warn if
     # available space is below this threshold.
     config['min_gb_required'] = config.get('min_gb_required', 10)
@@ -381,7 +374,8 @@ def process_deployments(config_path='configurations.yml'):
                     'bpp': bpp,
                     'width': data['width'],
                     'height': data['height'],
-                    'fps': data['fps']
+                    'fps': data['fps'],
+                    'bit_rate': data['bit_rate']
                 })
             cumulative_time = file_end
 
@@ -424,6 +418,10 @@ def process_deployments(config_path='configurations.yml'):
                 f"setpts=PTS-STARTPTS{trim_label}"
             )
             filter_inputs += trim_label
+            
+        # Target bitrate based on original GoPro metadata to ensure visual fidelity
+        target_bitrate = f"{int(cumulative_size * 8 / video_duration_sec)}"
+            
         print(f"  > Estimated size of stitched video without quality loss: {cumulative_size / (2**30):.2f} GB\n", flush=True)
         print("    This utility uses a `libx264` (CPU) encoder that is generally more efficient than the GoPro's internal hardware.", flush=True)    
         print("    This means you will often find that an output file with a lower bitrate than the original actually contains the", flush=True)
@@ -432,8 +430,9 @@ def process_deployments(config_path='configurations.yml'):
         print('    "visually lossless" quality.\n', flush=True)
         
         # Calculate average bits per pixel from original videos
-        avg_bpp = cumulative_bpp / len(needed_files)
-        print(f"  > Average Information Density (BPP) of original videos: {avg_bpp:.4f}", flush=True)
+        avg_bpp_src = cumulative_bpp / len(needed_files)
+        print(f"  > Average Information Density (BPP) of original videos: {avg_bpp_src:.4f}", flush=True)
+        print(f"  > Targeting Bitrate: {int(target_bitrate)/1_000_000:.2f} Mbps to match source density.\n", flush=True)
 
         # Build the filter string: e.g., `[0:v][1:v]concat=n=2:v=1[outv]`:
         # Concatenate video (v) from files 0-1 into 1 video from the 2 inputs
@@ -520,40 +519,30 @@ def process_deployments(config_path='configurations.yml'):
             print(full_table_str)
 
         # Build execution command
-        #   -c:v: video codec (coder/decoder) to use for encoding. Value
-        #       depends on whether GPU acceleration is enabled.
-        #   -rc: use Variable Bit Rate mode, allowing encoder to use more data
-        #       for complex scenes (moving fish) and less for static ones
-        #   -cq: "constant quality" setting for GPU encoder. Lower numbers (10)
-        #       prioritize high visual detail. GPU equivalent of CRF.
-        #   -crf: "constant rate factor" quality setting for CPU encoder. Lower
-        #       values (10) prioritize high visual detail. CPU equivalent of CQ
-        #   -b:v: target bitrate for output video. Set to 0 to disable default
-        #       bitrate cap and strictly follow `-cq` settings
+        #   -c:v: video codec (coder/decoder) to use for encoding
+        #   -rc: use Variable Bit Rate mode for NVENC
+        #   -b:v: target bitrate for output video. Dynamically matched to the
+        #         original GoPro metadata for archival fidelity
         #   -maxrate: maximum rate to prevent file size from exploding during
-        #       extremely complex frames
-        #   -bufsize: buffer size telling teh encoder how much video to look at
-        #       when deciding how to distribute the bitrate
-        #   -preset: encoding preset; higher quality presets take longer to
-        #       encode. Use "p7" for highest quality.
-        #   -y: overwrite output file if it exists without asking permission
+        #             extremely complex frames
+        #   -bufsize: buffer size for rate control
+        #   -preset: encoding preset; higher quality presets take longer
+        #   -y: overwrite output file if it exists
         #   -map: select the output from the filter
         #   -an: exclude audio from new file
-        #   -t: duration of the output video (1440 seconds = 24 minutes)
+        #   -t: duration of the output video
         if config['use_gpu']:
             encoder_args = [
                 "-c:v", "h264_nvenc",
                 "-rc", "vbr",
-                "-cq", str(config['quality_crf']),
-                "-b:v", "0",
+                "-b:v", target_bitrate,      # Dynamically match source bitrate
                 "-maxrate", "100M",
                 "-bufsize", "100M",
-                "-preset", "p7",
-            ]
+                "-preset", "p7",            ]
         else:
             encoder_args = [
                 "-c:v", "libx264",
-                "-crf", str(config['quality_crf']),
+                "-b:v", target_bitrate,      # Dynamically match source bitrate
                 "-preset", "medium",
             ]
         
@@ -602,43 +591,35 @@ def process_deployments(config_path='configurations.yml'):
         print(f"    {final_info}\n", flush=True)
     
         # Check expectations
-        is_bpp_ideal_80 = avg_bpp * 0.80 <= actual_bpp <= avg_bpp * 1.20
+        is_bpp_ideal_80 = avg_bpp_src * 0.80 <= actual_bpp <= avg_bpp_src * 1.20
         is_size_ideal_80 = cumulative_size * 0.80 <= actual_size <= cumulative_size * 1.20
-        is_bpp_ideal_90 = avg_bpp * 0.90 <= actual_bpp <= avg_bpp * 1.10
+        is_bpp_ideal_90 = avg_bpp_src * 0.90 <= actual_bpp <= avg_bpp_src * 1.10
         is_size_ideal_90 = cumulative_size * 0.90 <= actual_size <= cumulative_size * 1.10
 
         # Add to log file
         with open(config['log_file'], "a") as log:
             log.write(f"SUMMARY OF FOLDER {folder_id}:\n")
-            log.write(f"    Average bits per pixel (BPP) of original videos: {avg_bpp:.4f}\n")
+            log.write(f"    Average bits per pixel (BPP) of original videos: {avg_bpp_src:.4f}\n")
             log.write(f"    Estimated size of output video without visual quality loss: {cumulative_size / (2**30):.2f} GB\n\n")
             log.write(' '*30 + '* '*10 + '\n\n')
             log.write(f"    Output video: {final_info}\n\n")
-            log.write(f"    -> Within 80% of original average BPP:  {'YES' if is_bpp_ideal_80 else 'NO   X'}\n")
-            log.write(f"    -> Within 80% of estimated file size:   {'YES' if is_size_ideal_80 else 'NO   X'}\n")
-            log.write(f"    -> Within 90% of original average BPP:  {'YES' if is_bpp_ideal_90 else 'NO   X'}\n")
-            log.write(f"    -> Within 90% of estimated file size:   {'YES' if is_size_ideal_90 else 'NO   X'}\n\n")
+            log.write(f"    -> Within 80% of original average BPP:  {'YES' if is_bpp_ideal_80 else 'NO  X'}\n")
+            log.write(f"    -> Within 80% of estimated file size:   {'YES' if is_size_ideal_80 else 'NO  X'}\n")
+            log.write(f"    -> Within 90% of original average BPP:  {'YES' if is_bpp_ideal_90 else 'NO  X'}\n")
+            log.write(f"    -> Within 90% of estimated file size:   {'YES' if is_size_ideal_90 else 'NO  X'}\n\n")
 
         if not all([is_bpp_ideal_90, is_size_ideal_90]):
             with open(config['log_file'], "a") as log:
                 log.write("    WARNING: Output video is NOT within 90% of the original BPP and/or file\n")
-                log.write("             size. Consider adjusting `quality_crf` as needed to minimize\n")
-                log.write("             quality loss (too small; decrease `quality_crf`) or wasted space\n")
-                log.write("             (too large; increase `quality_crf`).\n\n")
+                log.write("             size. Output may be too small (quality loss) or too large (wasted space).\n\n")
             print("    WARNING: Output video is NOT within 90% of the original BPP and/or file", flush=True)
-            print("             size. Consider adjusting `quality_crf` as needed to minimize", flush=True)
-            print("             quality loss (too small; decrease `quality_crf`) or wasted space", flush=True)
-            print("             (too large; increase `quality_crf`).\n", flush=True)
+            print("             size. Output may be too small (quality loss) or too large (wasted space).\n", flush=True)
         elif not all([is_bpp_ideal_80, is_size_ideal_80]):
             with open(config['log_file'], "a") as log:
                 log.write("    WARNING: Output video is NOT within 80% of the original BPP and/or file\n")
-                log.write("             size. Consider adjusting `quality_crf` as needed to minimize\n")
-                log.write("             quality loss (too small; decrease `quality_crf`) or wasted space\n")
-                log.write("             (too large; increase `quality_crf`).\n")
+                log.write("             size. Output may be too small (quality loss) or too large (wasted space).\n")
             print("    WARNING: Output video is NOT within 80% of the original BPP and/or file", flush=True)
-            print("             size. Consider adjusting `quality_crf` as needed to minimize", flush=True)
-            print("             quality loss (too small; decrease `quality_crf`) or wasted space", flush=True)
-            print("             (too large; increase `quality_crf`).\n", flush=True)
+            print("             size. Output may be too small (quality loss) or too large (wasted space).\n", flush=True)
 
     # Add space to end of log file for readability between runs
     with open(config['log_file'], "a") as log:
