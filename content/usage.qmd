@@ -6,6 +6,11 @@ metadata-files:
 order: 4
 ---
 
+Two tips before getting started:
+
+1. It is recommended to [create a new branch](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/about-branches) for any changes or experiments. This allows you to work without affecting the main branch and helps minimize version conflicts in the future.
+2. Do not modify the `configurations-template.yml` file provided in the repository. Instead, make a copy of this file to preserve the version-controlled template for future use. Newly created configurations will be ignored by Git version control.
+
 There are multiple ways to use this utility depending on your familiarity with Git, R, Python, and/or command line. In order of increasing technical complexity, the options are:
 
 ### No command line

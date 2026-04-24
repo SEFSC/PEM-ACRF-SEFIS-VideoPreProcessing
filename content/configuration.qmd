@@ -6,7 +6,7 @@ metadata-files:
 order: 3
 ---
 
-A `configurations.yml` file is an easy way to control tool behavior as well as keep a record of the settings used each time. The most important settings in this file to pay attention to are:
+A `configurations.yml` file is an easy way to control tool behavior as well as keep a record of the settings used each time. A template, called `configurations-template.yml`, is provided in the repository. Make a copy of this file and rename it to avoid overwriting the template. The most important settings in this file to pay attention to are:
 
 1. The directory containing the videos to process
 2. The directory containing the CSV metadata file and the relevant column headers
@@ -35,6 +35,7 @@ use_gpu: false
 ffmpeg_path: "ffmpeg/bin/ffmpeg.exe"
 ffprobe_path: "ffmpeg/bin/ffprobe.exe"
 ```
+It is recommended to [create a new branch](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/about-branches) for any changes or experiments, including creating and modifying configuration files. This allows you to work without affecting the main branch and minimize version conflicts in the future.
 
 ::: {.callout-tip title="A note on reproducibility"}
 For the sake of documenting workflows and facilitating future reproducibility, consider creating new configuration files for each collection of videos processed (for example, one for each parent folder containing multiple deployments). There is no restriction on what this file can be called; you will tell the script which file to use when you [execute the script](usage.qmd#running-the-model). Thus, some convention like `configuration-2025.yml` might be sensible. It is best practice to avoid spaces and special characters other than underscores and hyphens in file names to avoid issues with file paths.
