@@ -11,6 +11,8 @@ __pycache__/
 _videos/
 ffmpeg/
 *log*.txt
+*.yml
+!configurations-template.yml
 
 .DS_Store
 Thumbs.db
