@@ -1,6 +1,16 @@
 .quarto/
 _site/
 
+.Rhistory
+.RData
+.Rapp.history
+
+.venv
+__pycache__/
+
 _videos/
 ffmpeg/
 *log*.txt
+
+.DS_Store
+Thumbs.db
