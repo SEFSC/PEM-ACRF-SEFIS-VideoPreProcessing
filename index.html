@@ -598,8 +598,8 @@ Note
 <table class="caption-top table">
 <caption>Additional settings that can be adjusted if needed or as desired. These can be omitted from the configuration file if the default values are acceptable.</caption>
 <colgroup>
-<col style="width: 25%">
-<col style="width: 74%">
+<col style="width: 29%">
+<col style="width: 70%">
 </colgroup>
 <thead>
 <tr class="header">
@@ -617,19 +617,19 @@ Note
 <td style="text-align: left;">(int) Minimum required free disk space in GB to start processing. Script will warn if available space is below this threshold. Defaults to 10.</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;"><code>timeout_min</code></td>
+<td style="text-align: left;"><code>timeout_minutes</code></td>
 <td style="text-align: left;">(int) Maximum time in whole minutes to try processing a video before giving up. Can be used to prevent hang ups due to bad network connections, but be sure to allow enough time to actually process a video. Fractional minutes or <code>MM:SS</code> not yet supported. Defaults to None (no timeout).</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><code>preread_time_min</code></td>
+<td style="text-align: left;"><code>preread_time_minutes</code></td>
 <td style="text-align: left;">(int) Number of whole minutes between the time on the bottom and the start of the extracted video segment. Fractional minutes or <code>MM:SS</code> not yet supported. Defaults to 8.</td>
 </tr>
 <tr class="odd">
 <td style="text-align: left;"><code>quality_crf</code></td>
-<td style="text-align: left;">(int) Constant Rate Factor (CRF) for video encoding quality. Lower values mean better quality: 18 is high quality, 23 is standard. 10 with <code>use_gpu: false</code> or 11 with <code>use_gpu: true</code> produced bit rate and file size most similar to those of the original GoPro files during trial and error testing. Often machine (hardware) dependent. Defaults to 10.</td>
+<td style="text-align: left;">(int or “auto”) Constant Rate Factor (CRF) for video encoding quality. Lower values mean better quality: 18 is high quality, 23 is standard. 10 with <code>use_gpu: false</code> or 11 with <code>use_gpu: true</code> produced bit rate and file size most similar to those of the original GoPro files during trial and error testing. Often machine (hardware) dependent. If set to “auto”, the input video bit rate will be used to dynamically calculate a target bitrate for the output video. Defaults to “auto”.</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><code>video_duration_min</code></td>
+<td style="text-align: left;"><code>video_duration_minutes</code></td>
 <td style="text-align: left;">(int) Expected duration of the final video in whole minutes. Fractional minutes or <code>MM:SS</code> not yet supported. Defaults to 24.</td>
 </tr>
 <tr class="odd">
