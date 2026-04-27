@@ -50,6 +50,7 @@ import sys
 import time
 import argparse
 import subprocess
+import textwrap
 from tqdm import tqdm
 
 def parse_args():
@@ -79,7 +80,7 @@ def get_video_metadata(file_path, ffprobe_path):
 
     Returns
     -------
-    list: [duration, creation_time, fps, bit_rate, width, height]
+    list: [duration, creation_time, fps]
         duration: float, duration of the video in seconds
         creation_time: str, creation time of the video
             (e.g., "2024-01-01T12:00:00Z")
@@ -126,6 +127,13 @@ def get_video_metadata(file_path, ffprobe_path):
 def calculate_file_size(duration, bit_rate):
     """Calculates the file size in bytes based on duration and bit rate."""
     return int((duration * bit_rate) / 8)
+
+def log_and_print(message, log_path, indent="    "):
+    """Dents, indents, and writes a message to both console and log."""
+    clean_msg = textwrap.indent(textwrap.dedent(message).strip(), indent)
+    print(clean_msg + "\n", flush=True)
+    with open(log_path, "a") as log:
+        log.write(clean_msg + "\n\n")
 
 def get_fps_from_metadata(metadata):
     """
@@ -249,12 +257,11 @@ def process_deployments(config_path='configurations.yml'):
     video_duration_sec = int(config['video_duration_min']) * 60
 
     # Video encoding quality. Lower values mean better quality:
-    #   -> 18 is high quality, 23 is standard
-    #   -> 10 with `use_gpu: false` or 11 with `use_gpu: true` produced bit
-    #      rate and file size most similar to those of the original GoPro files
-    #      during trial and error testing. Often machine-dependent.
-    config['quality_crf'] = config.get('quality_crf', 10)
-    
+    # Defaults to "auto" whereby the original video's bit rate is used to
+    # dynamically calculate a target bitrate for the output video. 
+    config['quality_crf'] = config.get('quality_crf', 'auto')
+    is_auto_mode = str(config['quality_crf']).lower() == 'auto'
+
     # Minimum disk space required to run script (in GB). Script will warn if
     # available space is below this threshold.
     config['min_gb_required'] = config.get('min_gb_required', 10)
@@ -262,7 +269,7 @@ def process_deployments(config_path='configurations.yml'):
     # Check Disk Space
     total, used, free = shutil.disk_usage(config['output_directory'])
     if free // (2**30) < config['min_gb_required']:
-        print(f"WARNING: Low disk space ({free // (2**30)}GB remaining).")
+        log_and_print(f"WARNING: Low disk space ({free // (2**30)}GB remaining).", config['log_file'])
 
     # Initialize the session in the log file, wiping it clean if desired.
     mode = "w" if config['clear_log'] else "a"
@@ -359,7 +366,7 @@ def process_deployments(config_path='configurations.yml'):
         
         # Check the start times and durations of each video to determine which
         # files are needed to stitch together and where to clip partial videos
-        print("  > Determining needed files and trim points...\n", flush=True)
+        print("  > Determining needed files and trim points...", flush=True)
         cumulative_time = 0
         needed_files = []
         for data in file_data:
@@ -383,7 +390,8 @@ def process_deployments(config_path='configurations.yml'):
                     'bpp': bpp,
                     'width': data['width'],
                     'height': data['height'],
-                    'fps': data['fps']
+                    'fps': data['fps'],
+                    'bit_rate': data['bit_rate']
                 })
             cumulative_time = file_end
 
@@ -395,11 +403,6 @@ def process_deployments(config_path='configurations.yml'):
 
         # 5. FFmpeg COMMAND
         # Trim each file INDIVIDUALLY before stitching:
-        #   -i: input media file
-        #   -t: duration of the clip to take (24 mins = 1440 seconds)
-        #   -ss: seeks to the start point for the specified file (relative to
-        #        the start of the concatenated stream)
-        # See https://ffmpeg.org/ffmpeg.html
         cumulative_size = 0
         cumulative_bpp = 0
         input_args = []
@@ -431,20 +434,12 @@ def process_deployments(config_path='configurations.yml'):
             # Concat requires inputs in [v0][a0][v1][a1]... order
             filter_inputs += f"{v_label}{a_label}"
 
-        print(f"  > Estimated size of stitched video without quality loss: {cumulative_size / (2**30):.2f} GB\n", flush=True)
-        print("    This utility uses a `libx264` (CPU) encoder that is generally more efficient than the GoPro's internal hardware.", flush=True)    
-        print("    This means you will often find that an output file with a lower bitrate than the original actually contains the", flush=True)
-        print("    same amount of visual information. Your target shouldn't necessarily be an identical file size, but rather a file", flush=True)
-        print('    file size that stays within 80-90% of the original and a BPP within 80% of the original in order to maintain', flush=True)
-        print('    "visually lossless" quality.\n', flush=True)
-        
-        # Calculate average bits per pixel from original videos
-        avg_bpp_src = cumulative_bpp / len(needed_files)
-        print(f"  > Average Information Density (BPP) of original videos: {avg_bpp_src:.4f}", flush=True)
+        # Target bitrate based on original GoPro metadata to ensure visual fidelity
+        if is_auto_mode:
+            target_bitrate = f"{int(cumulative_size * 8 / video_duration_sec)}"
+            print(f"  > Targeting bitrate {int(target_bitrate)/1_000_000:.2f} Mbps to match source density.", flush=True)
 
         # Build the filter string: e.g., `[0:v][0:a][1:v][1:a]concat=n=2:v=1:a=1[v_stitched][outa]`:
-        # Concatenate video (v) and audio (a) from files 0-1 into 1 video from
-        # the 2 inputs
         concat_part = f"{filter_inputs}concat=n={len(needed_files)}:v=1:a=1[v_stitched][outa]"
         filter_complex_parts.append(concat_part)
 
@@ -455,26 +450,19 @@ def process_deployments(config_path='configurations.yml'):
         
         # Get fonts to prevent potential crashes on Windows
         if config.get('diagnostic_mode'):
-            # Safeguard against missing fonts on Windows systems with
-            # OS-specific font selections
+            # Safeguard against missing fonts on Windows systems with OS-specific font selections
             if sys.platform.startswith("win"):
-                # Windows needs the escaped colon for the drive letter
                 font_path = r"C\:/Windows/Fonts/arial.ttf"
             elif sys.platform == "darwin":
-                # Standard macOS font path
                 font_path = "/Library/Fonts/Arial.ttf"
             else:
-                # Standard Linux (Ubuntu/Debian) path
                 font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
 
-            # Check if the font actually exists before trying to use it
-            # (On Linux/Mac, we need to remove the FFmpeg escapes to check with Python)
             check_path = font_path.replace(r"C\:", "C:").replace("\\", "")
             if not os.path.exists(check_path) and not sys.platform.startswith("win"):
                  print("WARNING: Default font not found. Diagnostic text may fail.")
 
-            # Add a diagnostic timestamp overlay in the top-left corner of the
-            # video with format HH:MM:SS:FF
+            # Add a diagnostic timestamp overlay in the top-left corner
             drawtext_filter = (
                 f"[outv]drawtext=fontfile='{font_path}':"
                 r"text='%{eif\:t/3600\:d\:2}\:%{eif\:mod(t/60,60)\:d\:2}\:%{eif\:mod(t,60)\:d\:2}\:%{eif\:" + str(fps) + r"*mod(t,1)\:d\:2}':"
@@ -494,7 +482,7 @@ def process_deployments(config_path='configurations.yml'):
 
         # Header
         table_lines.append(f"\n{'='*80}")
-        table_lines.append(f"{'QC SEAM INSPECTION TABLE - Folder: ' + folder_id:^80}")
+        table_lines.append(f"{'QC SEAM INSPECTION TABLE - Folder: ' + folder_id + ' (' + str(config['video_duration_min']) + ' min)':^80}")
         table_lines.append(f"{'='*80}")
         table_lines.append(f"{'NEW VIDEO TIME':<18} | {'ACTION':<17} | {'SOURCE FILE':<17} | {'SOURCE TIMESTAMP'}")
         table_lines.append(f"{'-'*19}|{'-'*19}|{'-'*19}|{'-'*20}")
@@ -530,43 +518,25 @@ def process_deployments(config_path='configurations.yml'):
             print(full_table_str)
 
         # Build execution command
-        #   -c:v: video codec (coder/decoder) to use for encoding. Value
-        #       depends on whether GPU acceleration is enabled.
-        #   -rc: use Variable Bit Rate mode, allowing encoder to use more data
-        #       for complex scenes (moving fish) and less for static ones
-        #   -cq: "constant quality" setting for GPU encoder. Lower numbers (10)
-        #       prioritize high visual detail. GPU equivalent of CRF.
-        #   -crf: "constant rate factor" quality setting for CPU encoder. Lower
-        #       values (10) prioritize high visual detail. CPU equivalent of CQ
-        #   -b:v: target bitrate for output video. Set to 0 to disable default
-        #       bitrate cap and strictly follow `-cq` settings
-        #   -maxrate: maximum rate to prevent file size from exploding during
-        #       extremely complex frames
-        #   -bufsize: buffer size telling teh encoder how much video to look at
-        #       when deciding how to distribute the bitrate
-        #   -preset: encoding preset; higher quality presets take longer to
-        #       encode. Use "p7" for highest quality.
-        #   -y: overwrite output file if it exists without asking permission
-        #   -map: select the output from the filter
-        #   -c:a: set the encoder to use for sound. Use 'aac' for advanced
-        #       audio coding format.
-        #   -t: duration of the output video (1440 seconds = 24 minutes)
         if config['use_gpu']:
             encoder_args = [
                 "-c:v", "h264_nvenc",
                 "-rc", "vbr",
-                "-cq", str(config['quality_crf']),
-                "-b:v", "0",
-                "-maxrate", "100M",
-                "-bufsize", "100M",
-                "-preset", "p7",
             ]
+            if is_auto_mode:
+                encoder_args += ["-b:v", target_bitrate, "-maxrate", "100M", "-bufsize", "100M"]
+            else:
+                encoder_args += ["-b:v", "0", "-cq", str(config['quality_crf'])]
+            encoder_args += ["-preset", "p7"]
         else:
             encoder_args = [
                 "-c:v", "libx264",
-                "-crf", str(config['quality_crf']),
-                "-preset", "medium",
             ]
+            if is_auto_mode:
+                encoder_args += ["-b:v", target_bitrate]
+            else:
+                encoder_args += ["-crf", str(config['quality_crf'])]
+            encoder_args += ["-preset", "medium"]
         
         cmd = [
             ffmpeg_exe, "-y"
@@ -576,14 +546,13 @@ def process_deployments(config_path='configurations.yml'):
             "-map", "[outa]",
         ] + encoder_args + [
             "-c:a", "aac",
-            "-t", "1440",
+            "-t", str(video_duration_sec),  # Dynamic safety ceiling
             output_path
         ]
 
         # Run the command and log any errors
         print("  > Clipping and stitching... This may take some time.\n", flush=True)
         try:
-            # Add a timeout to prevent infinite hangs
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         except subprocess.TimeoutExpired:
             print(f"\nERROR: ffmpeg timed out on {folder_id}. Is the network drive disconnected?")
@@ -596,9 +565,7 @@ def process_deployments(config_path='configurations.yml'):
         # Calculate actual metrics for the final video
         if os.path.exists(output_path):
             actual_size = os.path.getsize(output_path)
-            # Use video_duration_sec (default 1440) to find the actual bit rate
             actual_bitrate = (actual_size * 8) / video_duration_sec
-            # Calculate BPP for the output file based on source resolution/fps
             actual_bpp = actual_bitrate / (needed_files[0]['width'] * needed_files[0]['height'] * needed_files[0]['fps'])
         else:
             actual_size = 0
@@ -606,13 +573,22 @@ def process_deployments(config_path='configurations.yml'):
 
         # Calculate and print elapsed time with final QC metrics
         iter_duration = time.perf_counter() - iter_start
-        final_info = f"Size: {actual_size / (2**30):.2f} GB | BPP: {actual_bpp:.4f}"
+        avg_bpp_src = cumulative_bpp / len(needed_files)
+        expectations_table_lines = []
+        expectations_table_lines.append(f"{' '*23} | EXPECTED {' '*7} ACTUAL")
+        expectations_table_lines.append(f"    {'-'*20}|{'-'*30}")
+        expectations_table_lines.append(f"    OUTPUT FILE SIZE    | {cumulative_size / (2**30):.2f} GB {' ':<4} --> {actual_size / (2**30):.2f} GB")
+        expectations_table_lines.append(f"    BITRATE             | {int(target_bitrate)/1_000_000:.2f} Mbps {' ':<1} --> {actual_bitrate/1_000_000:.2f} Mbps")
+        expectations_table_lines.append(f"    INFORMATION DENSITY | {avg_bpp_src:.4f} BPP {' ':<1} --> {actual_bpp:.4f} BPP")
+        expectations_table_str = "\n".join(expectations_table_lines) +"\n"
+        
         if iter_duration > 60:
             print(f"  > Created {f"{folder_id}{config['video_extension']}"} in {iter_duration/60:.2f} minutes.", flush=True)
         else:
             print(f"  > Created {f"{folder_id}{config['video_extension']}"} in {iter_duration:.2f} seconds.", flush=True)
-        print(f"    {final_info}\n", flush=True)
-    
+        print("  > Output file statistics vs. expectations:\n", flush=True)
+        print(expectations_table_str, flush=True)
+
         # Check expectations
         is_bpp_ideal_80 = avg_bpp_src * 0.80 <= actual_bpp <= avg_bpp_src * 1.20
         is_size_ideal_80 = cumulative_size * 0.80 <= actual_size <= cumulative_size * 1.20
@@ -622,35 +598,47 @@ def process_deployments(config_path='configurations.yml'):
         # Add to log file
         with open(config['log_file'], "a") as log:
             log.write(f"SUMMARY OF FOLDER {folder_id}:\n")
-            log.write(f"    Average bits per pixel (BPP) of original videos: {avg_bpp_src:.4f}\n")
-            log.write(f"    Estimated size of output video without visual quality loss: {cumulative_size / (2**30):.2f} GB\n\n")
+            log.write(f"    Estimated output video size without visual quality loss: {cumulative_size / (2**30):.2f} GB\n")
+            log.write(f"    Estimated target bitrate to maintain visual fidelity: {int(target_bitrate)/1_000_000:.2f} Mbps\n")
+            log.write(f"    Average information density of original videos: {avg_bpp_src:.4f} bits per pixel (BPP)\n\n")
             log.write(' '*30 + '* '*10 + '\n\n')
-            log.write(f"    Output video: {final_info}\n\n")
-            log.write(f"    -> Within 80% of original average BPP:  {'YES' if is_bpp_ideal_80 else 'NO   X'}\n")
-            log.write(f"    -> Within 80% of estimated file size:   {'YES' if is_size_ideal_80 else 'NO   X'}\n")
-            log.write(f"    -> Within 90% of original average BPP:  {'YES' if is_bpp_ideal_90 else 'NO   X'}\n")
-            log.write(f"    -> Within 90% of estimated file size:   {'YES' if is_size_ideal_90 else 'NO   X'}\n\n")
+            log.write(f"    Output video file size: {actual_size / (2**30):.2f} GB\n")
+            log.write(f"    Output video bitrate:   {actual_bitrate/1_000_000:.2f} Mbps\n")
+            log.write(f"    Information density:    {actual_bpp:.4f} BPP\n\n")
+            log.write(f"    -> Within 80% of original average BPP:  {'YES' if is_bpp_ideal_80 else 'NO  X'}\n")
+            log.write(f"    -> Within 80% of estimated file size:   {'YES' if is_size_ideal_80 else 'NO  X'}\n")
+            log.write(f"    -> Within 90% of original average BPP:  {'YES' if is_bpp_ideal_90 else 'NO  X'}\n")
+            log.write(f"    -> Within 90% of estimated file size:   {'YES' if is_size_ideal_90 else 'NO  X'}\n\n")
+
+        # Centralized multi-line notes and warnings
+        quality_note = """
+            NOTE: This utility uses a `libx264` (CPU) encoder that is generally more
+            efficient than the GoPro's internal hardware. This means you will often
+            find that an output file with a lower bitrate than the original actually
+            contains the same amount of visual information. Your target shouldn't
+            necessarily be an identical file size, but rather a file size that stays
+            within 80-90% of the original and a BPP within 80% of the original in
+            order to maintain "visually lossless" quality.
+        """
+        
+        warning_90 = """
+            WARNING: Output video is NOT within 90% of the original BPP and/or file
+                     size. Output may be too small (quality loss) or too large (wasted
+                     space).
+        """
+
+        warning_80 = """
+            WARNING: Output video is NOT within 80% of the original BPP and/or file
+                     size. Output may be too small (quality loss) or too large (wasted
+                     space).
+        """
 
         if not all([is_bpp_ideal_90, is_size_ideal_90]):
-            with open(config['log_file'], "a") as log:
-                log.write("    WARNING: Output video is NOT within 90% of the original BPP and/or file\n")
-                log.write("             size. Consider adjusting `quality_crf` as needed to minimize\n")
-                log.write("             quality loss (too small; decrease `quality_crf`) or wasted space\n")
-                log.write("             (too large; increase `quality_crf`).\n\n")
-            print("    WARNING: Output video is NOT within 90% of the original BPP and/or file", flush=True)
-            print("             size. Consider adjusting `quality_crf` as needed to minimize", flush=True)
-            print("             quality loss (too small; decrease `quality_crf`) or wasted space", flush=True)
-            print("             (too large; increase `quality_crf`).\n", flush=True)
+            log_and_print(warning_90, config['log_file'])
+            log_and_print(quality_note, config['log_file'])
         elif not all([is_bpp_ideal_80, is_size_ideal_80]):
-            with open(config['log_file'], "a") as log:
-                log.write("    WARNING: Output video is NOT within 80% of the original BPP and/or file\n")
-                log.write("             size. Consider adjusting `quality_crf` as needed to minimize\n")
-                log.write("             quality loss (too small; decrease `quality_crf`) or wasted space\n")
-                log.write("             (too large; increase `quality_crf`).\n")
-            print("    WARNING: Output video is NOT within 80% of the original BPP and/or file", flush=True)
-            print("             size. Consider adjusting `quality_crf` as needed to minimize", flush=True)
-            print("             quality loss (too small; decrease `quality_crf`) or wasted space", flush=True)
-            print("             (too large; increase `quality_crf`).\n", flush=True)
+            log_and_print(warning_80, config['log_file'])
+            log_and_print(quality_note, config['log_file'])
 
     # Add space to end of log file for readability between runs
     with open(config['log_file'], "a") as log:
