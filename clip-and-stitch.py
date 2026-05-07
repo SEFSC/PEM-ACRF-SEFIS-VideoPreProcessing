@@ -9,6 +9,9 @@ ensures seamless stitching of video segments with precise millisecond
 alignment, even across GoPro chapter seams, while also handling NTSC timing.
 
 Key Features:
+    * Parallel Processing: Scales across CPU/GPU workers for bulk processing.
+    * Resilient Serial Upload: Pushes new video to a GCP cloud bucket using
+        `gcloud storage` after each encode.
     * Frame-Accurate Seeking: Uses FFmpeg's `trim` and `setpts` filters to 
         ensure exact millisecond alignment across GoPro chapter seams.
     * NTSC Correction: Automatically handles 29.97 fps (30000/1001) 
@@ -27,18 +30,25 @@ Required Dependencies:
     * tqdm: For progress visualization.
     * FFmpeg/ffprobe: Must be installed and accessible via system path 
         or config file.
+    * Google Cloud Software Development Kit (SDK): Google Cloud command line
+        interface (CLI) for pushing videos to cloud bucket
 
 Author:  matt.grossi@noaa.gov with creation and refactoring assistance from
          Google Gemini Coding Partner
 Project: Southeast Fishery Independent Survey (SEFIS)
-Version: 2026.0.1
-Note:    Gemini Coding Partner was used to assist with developing this code. The
-         code has been reviewed, edited, validated, and documented by NOAA
+Version: 2026.0.4
+Note:    Gemini Coding Partner was used to assist with developing this code.
+         The code has been reviewed, edited, validated, and documented by NOAA
          Fisheries staff.
 """
 
+# =============================================================================
+# PACKAGE DEPENDENCIES
+# =============================================================================
+
 from datetime import datetime
 import pandas as pd
+import argparse
 import shutil
 import yaml
 import json
@@ -46,10 +56,14 @@ import os
 import re
 import sys
 import time
-import argparse
-import subprocess
 import textwrap
+import subprocess
 from tqdm import tqdm
+from concurrent.futures import ProcessPoolExecutor, as_completed
+
+# =============================================================================
+# HELPER FUNCTIONS AND METHODS
+# =============================================================================
 
 def parse_args():
     """Parses command-line arguments."""
@@ -127,11 +141,37 @@ def calculate_file_size(duration, bit_rate):
     return int((duration * bit_rate) / 8)
 
 def log_and_print(message, log_path, indent="    "):
-    """Dents, indents, and writes a message to both console and log."""
+    """Indents and writes a message to both console and log."""
     clean_msg = textwrap.indent(textwrap.dedent(message).strip(), indent)
     print(clean_msg + "\n", flush=True)
     with open(log_path, "a") as log:
         log.write(clean_msg + "\n\n")
+
+def check_gcp_auth(bucket_path):
+    """Verifies Google Cloud storage access before starting."""
+    print(f"  > Verifying GCP access to {bucket_path}...", flush=True)
+    
+    # Use shutil.which to find the actual path of gcloud (handles .cmd on Windows)
+    gcloud_exec = shutil.which("gcloud")
+    
+    if not gcloud_exec:
+        print("\nERROR: 'gcloud' command not found. Is Google Cloud SDK installed and in your PATH?")
+        return False
+
+    try:
+        # Check access using the resolved gcloud path
+        result = subprocess.run([gcloud_exec, "storage", "ls", bucket_path], capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            print(f"\nERROR: GCP Authentication failed or bucket inaccessible.")
+            print(f"Details: {result.stderr.strip()}")
+            return False
+        return True
+        
+    except Exception as e:
+        # This catches unexpected system errors, not standard gcloud failures
+        print(f"\nERROR: An unexpected error occurred while checking GCP: {e}")
+        return False
 
 def get_fps_from_metadata(metadata):
     """
@@ -210,7 +250,6 @@ def seconds_to_timestamp(seconds, fps):
     if f >= int(round(fps)):
         f = 0
         s += 1
-        # (Add logic here to roll over minutes/hours if needed for absolute perfection)
         
     return f"{h:02}:{m:02}:{s:02}:{f:02}"
 
@@ -226,52 +265,449 @@ def get_gopro_sort_key(filename):
         return (int(rec_id), int(chapter))
     return (0, 0)
 
+# =============================================================================
+# WORKER TASK: PROCESS SINGLE DEPLOYMENT
+# =============================================================================
+
+def process_single_deployment(row, config, ffmpeg_exe, ffprobe_exe):
+    """Standalone task for processing one deployment."""
+    # Start timer for this video
+    iter_start = time.perf_counter()
+
+    folder_id = str(row[config['col_foldername']]).strip()
+    time_bottom_ceil = str(row['timebottom_ceil']).strip()
+
+    # Input and output directories
+    folder_path = os.path.join(config['input_directory'], folder_id)
+    if not os.path.exists(folder_path):
+        with open(config['log_file'], "a") as log:
+            log.write(f"SKIP: Folder {folder_path} not found.\n")
+        return {"status": "SKIP", "folder_id": folder_id}
+
+    output_path = os.path.join(config['output_directory'],
+                               f"{folder_id}{config['video_extension']}")
+
+    # Skip if output exists and reprocess is false
+    if not config['reprocess'] and os.path.exists(output_path):
+        with open(config['log_file'], "a") as log:
+            log.write(f"{os.path.basename(output_path)} exists and reprocess is set to False. Nothing to process. Skipping.\n")
+        return {"status": "SKIP", "folder_id": folder_id}
+
+    # Skip and log any folder listed in the CSV that doesn't exist in the
+    # input directory
+    if not os.path.exists(folder_path):
+        with open(config['log_file'], "a") as log:
+            log.write(f"SKIP: Folder {folder_id} not found.\n")
+        return {"status": "SKIP", "folder_id": folder_id}
+
+    # 3. GATHER & SORT FILES
+    video_files = [f for f in os.listdir(folder_path) 
+                   if f.upper().endswith(config['video_extension'].upper())]
+    
+    # Skip and log if no video files are found in the folder
+    if not video_files:
+        with open(config['log_file'], "a") as log:
+            log.write(f"SKIP: No videos in {folder_id}.\n")
+        return {"status": "SKIP", "folder_id": folder_id}
+
+    # Sort by GoPro filename instead of metadata creation_time, since all
+    # file chunks have the same creation time
+    video_files.sort(key=get_gopro_sort_key)
+
+    # Get file duration from the metadata
+    print(f"\n  > Probing metadata for {len(video_files)} videos in {folder_id}...", flush=True)
+    file_data = []
+    for f in video_files:
+        full_p = os.path.join(folder_path, f)
+        dur, _, fps, br, w, h = get_video_metadata(
+            file_path=full_p,
+            ffprobe_path=ffprobe_exe
+            )
+        file_data.append({'path': full_p, 'duration': dur, 'fps': fps, 'bit_rate': br, 'width': w, 'height': h})
+
+    # 4. CALCULATE TIMELINE
+    # Start time is `preread_time_minutes` minutes (default 8) from the time on
+    # the bottom rounded up to the nearest 30 seconds
+    # End time is `video_duration_minutes` minutes (default 24) after the start
+    # time
+    preread_time_sec = int(config['preread_time_minutes']) * 60
+    video_duration_sec = int(config['video_duration_minutes']) * 60
+    start_seconds = timestamp_to_seconds(time_bottom_ceil, fps) + preread_time_sec
+    end_seconds = start_seconds + video_duration_sec
+    
+    # Check the start times and durations of each video to determine which
+    # files are needed to stitch together and where to clip partial videos
+    print("  > Determining needed files and trim points...", flush=True)
+    cumulative_time = 0
+    needed_files = []
+    for data in file_data:
+        file_start = cumulative_time
+        file_end = cumulative_time + data['duration']
+        
+        # Check whether this file overlaps with the desired clip range
+        if file_end > start_seconds and file_start < end_seconds:
+            # Store the relative start/end for THIS specific file
+            rel_start = max(0, start_seconds - file_start)
+            rel_end = min(data['duration'], end_seconds - file_start)
+
+            # Calculate BPP for the current chapter
+            bpp = data['bit_rate'] / (data['width'] * data['height'] * data['fps'])
+            
+            needed_files.append({
+                'path': data['path'], 
+                'ss': rel_start, 
+                't': rel_end - rel_start,
+                'size': calculate_file_size(rel_end - rel_start, data['bit_rate']),
+                'bpp': bpp,
+                'width': data['width'],
+                'height': data['height'],
+                'fps': data['fps'],
+                'bit_rate': data['bit_rate']
+            })
+        cumulative_time = file_end
+
+    # If no footage matches the 24-minute window, log and skip
+    if not needed_files:
+        with open(config['log_file'], "a") as log:
+            log.write(f"SKIP: {folder_id} - No footage found for the requested time window.\n")
+        return {"status": "SKIP", "folder_id": folder_id}
+
+    # 5. FFmpeg COMMAND
+    # Trim each file individually before stitching
+    # See https://ffmpeg.org/ffmpeg.html
+    cumulative_size = 0
+    cumulative_bpp = 0
+    input_args = []
+    filter_complex_parts = []
+    filter_inputs = ""
+    for i, f_info in enumerate(needed_files):
+        # Update cumulative statistics
+        cumulative_size += f_info['size']
+        cumulative_bpp += f_info['bpp']
+
+        # Add the input file normally
+        input_args.extend(["-i", f_info['path']])
+
+        # Add a small 'epsilon' to the duration to ensure the final frame is
+        # included in the trim.
+        trim_duration = f_info['t'] + 0.1
+
+        # Trim the video using start time and duration (seconds) and reset the
+        # clock of the trimmed segment (`setpts`) to 0 so the stitcher sees a
+        # clean sequence starting from 0.0s
+        trim_label = f"[v{i}]"
+        filter_complex_parts.append(
+            f"[{i}:v]trim=start={f_info['ss']}:duration={trim_duration},"
+            f"setpts=PTS-STARTPTS{trim_label}"
+        )
+        filter_inputs += trim_label
+
+    # Target bitrate based on original GoPro metadata to ensure visual
+    # fidelity
+    target_bitrate = f"{int(cumulative_size * 8 / video_duration_sec)}"
+    is_auto_mode = str(config['quality_crf']).lower() == 'auto'
+    if is_auto_mode:
+        print(f"  > Targeting bitrate {int(target_bitrate)/1_000_000:.2f} Mbps to match source density.", flush=True)
+
+    # Build the filter string: e.g., `[0:v][1:v]concat=n=2:v=1[outv]`:
+    # Concatenate video (v) from files 0-n into 1 video stream.
+    # Force the frame rate (fps=fps={fps}) right after the concat to prevent
+    # drift during the stitch. 'round=near' prevents frame drops due to math
+    # drift.
+    concat_part = f"{filter_inputs}concat=n={len(needed_files)}:v=1,fps=fps={fps}:round=near[outv]"
+    filter_complex_parts.append(concat_part)
+    
+    # Get fonts to prevent potential crashes on Windows
+    if config.get('diagnostic_mode'):
+        # Safeguard against missing fonts on Windows systems with OS-specific
+        # font selections
+        if sys.platform.startswith("win"):
+            # Windows needs the escaped colon for the drive letter
+            font_path = r"C\:/Windows/Fonts/arial.ttf"
+        elif sys.platform == "darwin":
+            # Standard macOS font path
+            font_path = "/Library/Fonts/Arial.ttf"
+        else:
+            # Standard Linux (Ubuntu/Debian) path
+            font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+
+        # Check if the font actually exists before trying to use it
+        # (On Linux/Mac, we need to remove the FFmpeg escapes to check with
+        # Python)
+        check_path = font_path.replace(r"C\:", "C:").replace("\\", "")
+        if not os.path.exists(check_path) and not sys.platform.startswith("win"):
+             print("WARNING: Default font not found. Diagnostic text may fail.")
+
+        # Add a diagnostic timestamp overlay in the top-left corner of the
+        # video with format HH:MM:SS:FF
+        drawtext_filter = (
+            f"[outv]drawtext=fontfile='{font_path}':"
+            r"text='%{eif\:t/3600\:d\:2}\:%{eif\:mod(t/60,60)\:d\:2}\:%{eif\:mod(t,60)\:d\:2}\:%{eif\:" + str(fps) + r"*mod(t,1)\:d\:2}':"
+            "x=10:y=10:fontsize=48:fontcolor=white:box=1:boxcolor=black@0.5[diagout]"
+        )
+        filter_complex_parts.append(drawtext_filter)
+        maparg = "[diagout]"
+    else:
+        maparg = "[outv]"
+
+    # Join all filter parts with semicolons
+    filter_str = "; ".join(filter_complex_parts)
+
+    # 6. GENERATE QC TABLE
+    cumulative = 0
+    table_lines = []
+
+    # Header
+    table_lines.append(f"\n{'='*80}")
+    table_lines.append(f"{'QC SEAM INSPECTION TABLE - Folder: ' + folder_id + ' (' + str(config['video_duration_minutes']) + ' min)':^80}")
+    table_lines.append(f"{'='*80}")
+    table_lines.append(f"{'NEW VIDEO TIME':<18} | {'ACTION':<17} | {'SOURCE FILE':<17} | {'SOURCE TIMESTAMP'}")
+    table_lines.append(f"{'-'*19}|{'-'*19}|{'-'*19}|{'-'*20}")
+
+    # Content
+    for i, segment in enumerate(needed_files):
+        file_name = os.path.basename(segment['path'])
+        start_ts = seconds_to_timestamp(cumulative, fps)
+        source_start = seconds_to_timestamp(segment['ss'], fps)
+        
+        table_lines.append(f"{start_ts:<18} | START SEGMENT     | {file_name:<17} | {source_start}")
+        
+        cumulative += segment['t']
+        end_ts = seconds_to_timestamp(cumulative, fps)
+        source_end = seconds_to_timestamp(segment['ss'] + segment['t'], fps)
+        
+        if i < len(needed_files) - 1:
+            table_lines.append(f"{end_ts:<18} | SEAM / STITCH     | {file_name:<17} | {source_end}")
+            table_lines.append(f"{' '*18} |        |||        | {' '*17} |")
+            table_lines.append(f"{' '*18} |        vvv        | {' '*17} |")
+        else:
+            table_lines.append(f"{end_ts:<18} | VIDEO END         | {file_name:<17} | {source_end}")
+
+    table_lines.append(f"{'='*80}\n")
+    full_table_str = "\n".join(table_lines)
+
+    # Write the table to the log file
+    with open(config['log_file'], "a") as log:
+        log.write(full_table_str)
+
+    # Only print to the console if diagnostic mode is on
+    if config.get('diagnostic_mode'):
+        print(full_table_str)
+
+    # Build execution command
+    #   -c:v: video codec (coder/decoder) to use for encoding. Value
+    #       depends on whether GPU acceleration is enabled.
+    #   -rc: use Variable Bit Rate mode, allowing encoder to use more data
+    #       for complex scenes (moving fish) and less for static ones
+    #   -cq: "constant quality" setting for GPU encoder. Lower numbers (10)
+    #       prioritize high visual detail. GPU equivalent of CRF.
+    #   -crf: "constant rate factor" quality setting for CPU encoder. Lower
+    #       values (10) prioritize high visual detail. CPU equivalent of CQ
+    #   -b:v: target bitrate for output video. Set to 0 to disable default
+    #       bitrate cap and strictly follow `-cq` settings
+    #   -maxrate: maximum rate to prevent file size from exploding during
+    #       extremely complex frames
+    #   -bufsize: buffer size telling the encoder how much video to look at
+    #       when deciding how to distribute the bitrate
+    #   -preset: encoding preset; higher quality presets take longer to
+    #       encode. Use "p7" for highest quality.
+    #   -y: overwrite output file if it exists without asking permission
+    #   -map: select the output from the filter
+    #   -an: exclude audio from new file
+    #   -t: duration of the output video
+    if config['use_gpu']:
+        encoder_args = [
+            "-c:v", "h264_nvenc",
+            "-rc", "vbr",
+        ]
+        if is_auto_mode:
+            # Archival bitrate targeting (ABR/VBR)
+            encoder_args += ["-b:v", target_bitrate, "-maxrate", "100M", "-bufsize", "100M"]
+        else:
+            # Manual Constant Quality Parameter (CQP) override
+            encoder_args += ["-b:v", "0", "-cq", str(config['quality_crf'])]
+        encoder_args += ["-preset", "p7"]
+    else:
+        encoder_args = [
+            "-c:v", "libx264",
+        ]
+        if is_auto_mode:
+            # Archival Bitrate Targeting (ABR)
+            encoder_args += ["-b:v", target_bitrate]
+        else:
+            # Manual Constant Rate Factor (CRF) override
+            encoder_args += ["-crf", str(config['quality_crf'])]
+        encoder_args += ["-preset", "medium"]
+    
+    cmd = [
+        ffmpeg_exe, "-y"
+    ] + input_args + [
+        "-filter_complex", filter_str,
+        "-map", maparg,
+        "-an"
+    ] + encoder_args + [
+        "-t", str(video_duration_sec),
+        output_path
+    ]
+
+    # Run the command and log any errors
+    print("  > Clipping and stitching... This may take some time.\n", flush=True)
+    try:
+        # Add a timeout to prevent infinite hangs
+        timeout_val = int(config['timeout_minutes']) * 60 if config.get('timeout_minutes') else None
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_val)
+    except subprocess.TimeoutExpired:
+        print(f"\nERROR: ffmpeg timed out on {folder_id}. Is the network drive disconnected?")
+        return {"status": "ERROR", "folder_id": folder_id}
+        
+    if result.returncode != 0:
+        with open(config['log_file'], "a") as log:
+            log.write(f"ERROR in {folder_id}: {result.stderr}\n")
+        return {"status": "ERROR", "folder_id": folder_id}
+    
+    # Calculate actual metrics for the final video
+    if os.path.exists(output_path):
+        actual_size = os.path.getsize(output_path)
+        # Use `video_duration_sec` to find the actual bit rate
+        actual_bitrate = (actual_size * 8) / video_duration_sec
+        # Calculate BPP for the output file based on source resolution/fps
+        actual_bpp = actual_bitrate / (needed_files[0]['width'] * needed_files[0]['height'] * needed_files[0]['fps'])
+    else:
+        actual_size = 0
+        actual_bpp = 0
+
+    # Calculate and print elapsed time with final QC metrics
+    iter_duration = time.perf_counter() - iter_start
+    avg_bpp_src = cumulative_bpp / len(needed_files)
+    expectations_table_lines = []
+    expectations_table_lines.append(f"{' '*23} | EXPECTED {' '*7} ACTUAL")
+    expectations_table_lines.append(f"    {'-'*20}|{'-'*30}")
+    expectations_table_lines.append(f"    OUTPUT FILE SIZE    | {cumulative_size / (2**30):.2f} GB {' ':<4} --> {actual_size / (2**30):.2f} GB")
+    expectations_table_lines.append(f"    BITRATE             | {int(target_bitrate)/1_000_000:.2f} Mbps {' ':<1} --> {actual_bitrate/1_000_000:.2f} Mbps")
+    expectations_table_lines.append(f"    INFORMATION DENSITY | {avg_bpp_src:.4f} BPP {' ':<1} --> {actual_bpp:.4f} BPP")
+    expectations_table_str = "\n".join(expectations_table_lines) +"\n"
+    if iter_duration > 60:
+        print(f"  > Created {f'{folder_id}{config['video_extension']}'} in {iter_duration/60:.2f} minutes.\n", flush=True)
+    else:
+        print(f"  > Created {f'{folder_id}{config['video_extension']}'} in {iter_duration:.2f} seconds.\n", flush=True)
+    print("    Output file metrics versus expectations:\n", flush=True)
+    print(expectations_table_str, flush=True)
+
+    # Check expectations
+    is_bpp_ideal_80 = avg_bpp_src * 0.80 <= actual_bpp <= avg_bpp_src * 1.20
+    is_size_ideal_80 = cumulative_size * 0.80 <= actual_size <= cumulative_size * 1.20
+    is_bpp_ideal_90 = avg_bpp_src * 0.90 <= actual_bpp <= avg_bpp_src * 1.10
+    is_size_ideal_90 = cumulative_size * 0.90 <= actual_size <= cumulative_size * 1.10
+
+    # Add to log file
+    with open(config['log_file'], "a") as log:
+        log.write(f"SUMMARY OF FOLDER {folder_id}:\n")
+        log.write(f"    Estimated output video size without visual quality loss: {cumulative_size / (2**30):.2f} GB\n")
+        log.write(f"    Estimated target bitrate to maintain visual fidelity: {int(target_bitrate)/1_000_000:.2f} Mbps\n")
+        log.write(f"    Average information density of original videos: {avg_bpp_src:.4f} bits per pixel (BPP)\n\n")
+        log.write(' '*30 + '* '*10 + '\n\n')
+        log.write(f"    Output video file size: {actual_size / (2**30):.2f} GB\n")
+        log.write(f"    Output video bitrate:   {actual_bitrate/1_000_000:.2f} Mbps\n")
+        log.write(f"    Information density:    {actual_bpp:.4f} BPP\n\n")
+        log.write(f"    -> Within 80% of original average BPP:  {'YES' if is_bpp_ideal_80 else 'NO  X'}\n")
+        log.write(f"    -> Within 80% of estimated file size:   {'YES' if is_size_ideal_80 else 'NO  X'}\n")
+        log.write(f"    -> Within 90% of original average BPP:  {'YES' if is_bpp_ideal_90 else 'NO  X'}\n")
+        log.write(f"    -> Within 90% of estimated file size:   {'YES' if is_size_ideal_90 else 'NO  X'}\n\n")
+
+    # Centralized multi-line notes and warnings
+    quality_note = """
+        NOTE: This utility uses a `libx264` (CPU) encoder that is generally more
+        efficient than the GoPro's internal hardware. This means you will often
+        find that an output file with a lower bitrate than the original actually
+        contains the same amount of visual information. Your target shouldn't
+        necessarily be an identical file size, but rather a file size that stays
+        within 80-90% of the original and a BPP within 80% of the original in
+        order to maintain "visually lossless" quality.
+    """
+
+    warning_90 = """
+        WARNING: Output video is NOT within 90% of the original BPP and/or file
+                 size. Output may be too small (quality loss) or too large (wasted
+                 space).
+    """
+
+    warning_80 = """
+        WARNING: Output video is NOT within 80% of the original BPP and/or file
+                 size. Output may be too small (quality loss) or too large (wasted
+                 space).
+    """
+
+    if not all([is_bpp_ideal_90, is_size_ideal_90]):
+        log_and_print(warning_90, config['log_file'])
+        log_and_print(quality_note, config['log_file'])
+    elif not all([is_bpp_ideal_80, is_size_ideal_80]):
+        log_and_print(warning_80, config['log_file'])
+        log_and_print(quality_note, config['log_file'])
+
+    # GCP serial upload
+    upload_status = "PENDING"
+    if config.get('gcp_upload'):
+        # Upload to gcloud storage
+        gcloud_exec = shutil.which("gcloud")
+        up_res = subprocess.run([gcloud_exec, "storage", "cp", output_path, config['gcp_bucket_path']], capture_output=True)
+        if up_res.returncode == 0:
+            upload_status = "SUCCESS"
+            if config.get('delete_local_after_upload'):
+                os.remove(output_path)
+        else:
+            upload_status = "FAILED"
+
+    return {"status": "SUCCESS", "folder_id": folder_id, "upload_status": upload_status, "output_path": output_path}
+
+# =============================================================================
+# MAIN ROUTINE
+# =============================================================================
+
 def process_deployments(config_path='configurations.yml'):
+    """Orchestrates parallel processing and returns True if no critical errors occurred."""
     # Strip quotes that Windows adds when dragging/dropping files
     config_path = config_path.strip('"')
-    
-    # 1. SETUP & VALIDATION
     config = load_config(config_path)
-    os.makedirs(config['output_directory'], exist_ok=True)
     
-    # Get FFmpeg paths
-    ffmpeg_exe = get_ffmpeg_command(config, "ffmpeg")
-    ffprobe_exe = get_ffmpeg_command(config, "ffprobe")
-
     # SETTINGS THAT CAN ALSO BE OVERRIDDEN IN THE YAML CONFIG FILE
     config['clear_log'] = config.get('clear_log', False)
     config['diagnostic_mode'] = config.get('diagnostic_mode', False)
     config['log_file'] = config.get('log_file', 'processing_log.txt')
     config['preread_time_minutes'] = config.get('preread_time_minutes', 8)
     config['reprocess'] = config.get('reprocess', False)
-    config['timeout_minutes'] = config.get('timeout_minutes', None)
+    config['timeout_minutes'] = config.get('timeout_minutes', 60)
     config['use_gpu'] = config.get('use_gpu', False)
     config['video_duration_minutes'] = config.get('video_duration_minutes', 24)
     config['video_extension'] = config.get('video_extension', '.MP4')
-    
-    # Convert times to seconds
-    timeout = int(config['timeout_minutes']) * 60 if config.get('timeout_minutes') else None
-    preread_time_sec = int(config['preread_time_minutes']) * 60
-    video_duration_sec = int(config['video_duration_minutes']) * 60
-
-    # Video encoding quality. Lower values mean better quality:
-    #   -> 18 is high quality, 23 is standard
-    #   -> 10 with `use_gpu: false` or 11 with `use_gpu: true` produced bit
-    #      rate and file size most similar to those of the original GoPro files
-    #      during trial and error testing. Often machine-dependent.
-    # Defaults to "auto" whereby the original video's bit rate is used to
-    # dynamically calculate a target bitrate for the output video. 
-    config['quality_crf'] = config.get('quality_crf', 'auto')
-    is_auto_mode = str(config['quality_crf']).lower() == 'auto'
-
-    # Minimum disk space required to run script (in GB). Script will warn if
-    # available space is below this threshold.
     config['min_gb_required'] = config.get('min_gb_required', 10)
+    config['quality_crf'] = config.get('quality_crf', 'auto')
+    config['gcp_upload'] = config.get('gcp_upload', False)
+    config['delete_local_after_upload'] = config.get('delete_local_after_upload', False)
 
-    # Check Disk Space
+    # 1. SETUP & VALIDATION
+    os.makedirs(config['output_directory'], exist_ok=True)
     total, used, free = shutil.disk_usage(config['output_directory'])
     if free // (2**30) < config['min_gb_required']:
-        log_and_print(f"WARNING: Low disk space ({free // (2**30)}GB remaining).", config['log_file'])
+        log_and_print(f"ERROR: Insufficient disk space ({free // (2**30)}GB remaining). Stopping.", config['log_file'])
+        return False
+    
+    # Get FFmpeg paths
+    ffmpeg_exe = get_ffmpeg_command(config, "ffmpeg")
+    ffprobe_exe = get_ffmpeg_command(config, "ffprobe")
+
+    # Verify GCP access and settings
+    if config.get('gcp_upload'):
+        gcloud_exec = shutil.which("gcloud")
+        if 'gcp_bucket_path' not in config.keys():
+            print("\nERROR: `gcp_upload` set to True but no GCP bucket was defined. Use `gcp_bucket_path` to set destination bucket.")
+            return False
+        if not gcloud_exec:
+            print("\nERROR: 'gcloud' command not found. Is Google Cloud SDK installed?")
+            return False
+        if not check_gcp_auth(config['gcp_bucket_path']):
+            return False
+    elif 'gcp_bucket_path' in config.keys():
+        print("\n  > WARNING: A GCP bucket was passed but `gcp_upload` is False. Videos will not be uploaded to GCP unless `gcp_upload=True`.\n", flush=True)
 
     # Initialize the session in the log file, wiping it clean if desired.
     mode = "w" if config['clear_log'] else "a"
@@ -290,8 +726,7 @@ def process_deployments(config_path='configurations.yml'):
     except UnicodeDecodeError:
         df = pd.read_csv(config['csv_path'], encoding='ISO-8859-1')
     if len(df) == 0:
-        print("ERROR: CSV file appears to be empty.")
-        return
+        print("ERROR: CSV file appears to be empty."); return False
 
     # Clean and append to CSV
     df.columns = df.columns.str.strip()
@@ -300,385 +735,51 @@ def process_deployments(config_path='configurations.yml'):
 
     # Check for duplicates in foldername
     if df[config['col_foldername']].duplicated().any():
-        print("ERROR: Duplicate folder names found in CSV. Aborting.")
-        return
+        print("ERROR: Duplicate folder names found in CSV. Aborting."); return False
 
-    # 2. ITERATE THROUGH EACH VIDEO FOLDER
-    for _, row in tqdm(df.iterrows(), total=len(df), desc="Total Progress"):
-        # Start timer for this video
-        iter_start = time.perf_counter()
+    # Worker Pool Management
+    num_workers = config.get('num_workers', 1)
+    if config.get('use_gpu') and num_workers > 3:
+        print(f"  > GPU mode enabled. Capping concurrent workers at 3 for stability.")
+        num_workers = 3
 
-        folder_id = str(row[config['col_foldername']]).strip()
-        time_bottom_ceil = str(row['timebottom_ceil']).strip()
-
-        # Input and output directories
-        folder_path = os.path.join(config['input_directory'], folder_id)
-        if not os.path.exists(folder_path):
-            with open(config['log_file'], "a") as log:
-                log.write(f"SKIP: Folder {folder_path} not found.\n")
-            continue
-        output_path = os.path.join(config['output_directory'],
-                                   f"{folder_id}{config['video_extension']}")
-
-        # Skip if output exists and reprocess is false
-        if not config['reprocess'] and os.path.exists(output_path):
-            with open(config['log_file'], "a") as log:
-                log.write(f"{os.path.basename(output_path)} exists and reprocess is set to False. Nothing to process. Skipping.\n")
-            continue
-
-        # Skip and log any folder listed in the CSV that doesn't exist in the
-        # input directory
-        if not os.path.exists(folder_path):
-            with open(config['log_file'], "a") as log:
-                log.write(f"SKIP: Folder {folder_id} not found.\n")
-            continue
-
-        # 3. GATHER & SORT FILES
-        video_files = [f for f in os.listdir(folder_path) 
-                       if f.upper().endswith(config['video_extension'].upper())]
+    # Launch the parallel executor
+    tasks = df.to_dict('records')
+    failed_uploads, overall_success = [], True
+    
+    with ProcessPoolExecutor(max_workers=num_workers) as executor:
+        futures = {executor.submit(
+            process_single_deployment, row, config, ffmpeg_exe, ffprobe_exe): row for row in tasks}
         
-        # Skip and log if no video files are found in the folder
-        if not video_files:
-            with open(config['log_file'], "a") as log:
-                log.write(f"SKIP: No videos in {folder_id}.\n")
-            continue
+        for future in tqdm(as_completed(futures), total=len(futures), desc="Total Progress"):
+            result = future.result()
+            # If any worker fails, the overall success is False
+            if result['status'] == "ERROR":
+                overall_success = False
+            if result.get('status') == "SUCCESS" and result.get('upload_status') == "FAILED":
+                failed_uploads.append(result['output_path'])
 
-        # Sort by GoPro filename instead of metadata creation_time, since all
-        # file chunks have the same creation time
-        video_files.sort(key=get_gopro_sort_key)
-
-        # Get file duration from the metadata
-        print(f"\n  > Probing metadata for {len(video_files)} videos in {folder_id}...", flush=True)
-        file_data = []
-        for f in video_files:
-            full_p = os.path.join(folder_path, f)
-            dur, _, fps, br, w, h = get_video_metadata(
-                file_path=full_p,
-                ffprobe_path=ffprobe_exe
-                )
-            file_data.append({'path': full_p, 'duration': dur, 'fps': fps, 'bit_rate': br, 'width': w, 'height': h})
-
-        # 4. CALCULATE TIMELINE
-        # Start time is `preread_time_minutes` minutes (default 8) from the
-        # time on the bottom rounded up to the nearest 30 seconds
-        # End time is `video_duration_minutes` minutes (default 24) after the
-        # start time
-        start_seconds = timestamp_to_seconds(time_bottom_ceil, fps) + preread_time_sec
-        end_seconds = start_seconds + video_duration_sec
-        
-        # Check the start times and durations of each video to determine which
-        # files are needed to stitch together and where to clip partial videos
-        print("  > Determining needed files and trim points...", flush=True)
-        cumulative_time = 0
-        needed_files = []
-        for data in file_data:
-            file_start = cumulative_time
-            file_end = cumulative_time + data['duration']
-            
-            # Check whether this file overlaps with the desired clip range
-            if file_end > start_seconds and file_start < end_seconds:
-                # Store the relative start/end for THIS specific file
-                rel_start = max(0, start_seconds - file_start)
-                rel_end = min(data['duration'], end_seconds - file_start)
-
-                # Calculate BPP for the current chapter
-                bpp = data['bit_rate'] / (data['width'] * data['height'] * data['fps'])
-                
-                needed_files.append({
-                    'path': data['path'], 
-                    'ss': rel_start, 
-                    't': rel_end - rel_start,
-                    'size': calculate_file_size(rel_end - rel_start, data['bit_rate']),
-                    'bpp': bpp,
-                    'width': data['width'],
-                    'height': data['height'],
-                    'fps': data['fps'],
-                    'bit_rate': data['bit_rate']
-                })
-            cumulative_time = file_end
-
-        # If no footage matches the 24-minute window, log and skip
-        if not needed_files:
-            with open(config['log_file'], "a") as log:
-                log.write(f"SKIP: {folder_id} - No footage found for the requested time window.\n")
-            continue
-
-        # 5. FFmpeg COMMAND
-        # Trim each file INDIVIDUALLY before stitching
-        # See https://ffmpeg.org/ffmpeg.html
-        cumulative_size = 0
-        cumulative_bpp = 0
-        input_args = []
-        filter_complex_parts = []
-        filter_inputs = ""
-        for i, f_info in enumerate(needed_files):
-            # Update cumulative statistics
-            cumulative_size += f_info['size']
-            cumulative_bpp += f_info['bpp']
-
-            # Add the input file normally
-            input_args.extend(["-i", f_info['path']])
-
-            # Add a small 'epsilon' to the duration to ensure the final frame
-            # is included in the trim.
-            trim_duration = f_info['t'] + 0.1
-
-            # Trim the video using start time and duration (seconds) and
-            # reset the clock of the trimmed segment (setpts) to 0 so the
-            # stitcher sees a clean sequence starting from 0.0s
-            trim_label = f"[v{i}]"
-            filter_complex_parts.append(
-                f"[{i}:v]trim=start={f_info['ss']}:duration={trim_duration},"
-                f"setpts=PTS-STARTPTS{trim_label}"
-            )
-            filter_inputs += trim_label
-
-        # Target bitrate based on original GoPro metadata to ensure visual
-        # fidelity
-        target_bitrate = f"{int(cumulative_size * 8 / video_duration_sec)}"
-        if is_auto_mode:
-            print(f"  > Targeting bitrate {int(target_bitrate)/1_000_000:.2f} Mbps to match source density.", flush=True)
-
-        # Build the filter string: e.g., `[0:v][1:v]concat=n=2:v=1[outv]`:
-        # Concatenate video (v) from files 0-n into 1 video stream.
-        # Force the frame rate (fps=fps={fps}) right after the concat to 
-        # prevent NTSC drift during the stitch. 'round=near' prevents frame
-        # drops due to NTSC math drift.
-        concat_part = f"{filter_inputs}concat=n={len(needed_files)}:v=1,fps=fps={fps}:round=near[outv]"
-        filter_complex_parts.append(concat_part)
-        
-        # Get fonts to prevent potential crashes on Windows
-        if config.get('diagnostic_mode'):
-            # Safeguard against missing fonts on Windows systems with
-            # OS-specific font selections
-            if sys.platform.startswith("win"):
-                # Windows needs the escaped colon for the drive letter
-                font_path = r"C\:/Windows/Fonts/arial.ttf"
-            elif sys.platform == "darwin":
-                # Standard macOS font path
-                font_path = "/Library/Fonts/Arial.ttf"
-            else:
-                # Standard Linux (Ubuntu/Debian) path
-                font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
-
-            # Check if the font actually exists before trying to use it
-            # (On Linux/Mac, we need to remove the FFmpeg escapes to check with Python)
-            check_path = font_path.replace(r"C\:", "C:").replace("\\", "")
-            if not os.path.exists(check_path) and not sys.platform.startswith("win"):
-                 print("WARNING: Default font not found. Diagnostic text may fail.")
-
-            # Add a diagnostic timestamp overlay in the top-left corner of the
-            # video with format HH:MM:SS:FF
-            drawtext_filter = (
-                f"[outv]drawtext=fontfile='{font_path}':"
-                r"text='%{eif\:t/3600\:d\:2}\:%{eif\:mod(t/60,60)\:d\:2}\:%{eif\:mod(t,60)\:d\:2}\:%{eif\:" + str(fps) + r"*mod(t,1)\:d\:2}':"
-                "x=10:y=10:fontsize=48:fontcolor=white:box=1:boxcolor=black@0.5[diagout]"
-            )
-            filter_complex_parts.append(drawtext_filter)
-            maparg = "[diagout]"
-        else:
-            maparg = "[outv]"
-
-        # Join all filter parts with semicolons
-        filter_str = "; ".join(filter_complex_parts)
-
-        # 6. GENERATE QC TABLE
-        cumulative = 0
-        table_lines = []
-
-        # Header
-        table_lines.append(f"\n{'='*80}")
-        table_lines.append(f"{'QC SEAM INSPECTION TABLE - Folder: ' + folder_id + ' (' + str(config['video_duration_minutes']) + ' min)':^80}")
-        table_lines.append(f"{'='*80}")
-        table_lines.append(f"{'NEW VIDEO TIME':<18} | {'ACTION':<17} | {'SOURCE FILE':<17} | {'SOURCE TIMESTAMP'}")
-        table_lines.append(f"{'-'*19}|{'-'*19}|{'-'*19}|{'-'*20}")
-
-        # Content
-        for i, segment in enumerate(needed_files):
-            file_name = os.path.basename(segment['path'])
-            start_ts = seconds_to_timestamp(cumulative, fps)
-            source_start = seconds_to_timestamp(segment['ss'], fps)
-            
-            table_lines.append(f"{start_ts:<18} | START SEGMENT     | {file_name:<17} | {source_start}")
-            
-            cumulative += segment['t']
-            end_ts = seconds_to_timestamp(cumulative, fps)
-            source_end = seconds_to_timestamp(segment['ss'] + segment['t'], fps)
-            
-            if i < len(needed_files) - 1:
-                table_lines.append(f"{end_ts:<18} | SEAM / STITCH     | {file_name:<17} | {source_end}")
-                table_lines.append(f"{' '*18} |        |||        | {' '*17} |")
-                table_lines.append(f"{' '*18} |        vvv        | {' '*17} |")
-            else:
-                table_lines.append(f"{end_ts:<18} | VIDEO END         | {file_name:<17} | {source_end}")
-
-        table_lines.append(f"{'='*80}\n")
-        full_table_str = "\n".join(table_lines)
-
-        # Write the table to the log file
-        with open(config['log_file'], "a") as log:
-            log.write(full_table_str)
-
-        # Only print to the console if diagnostic mode is on
-        if config.get('diagnostic_mode'):
-            print(full_table_str)
-
-        # Build execution command
-        #   -c:v: video codec (coder/decoder) to use for encoding. Value
-        #       depends on whether GPU acceleration is enabled.
-        #   -rc: use Variable Bit Rate mode, allowing encoder to use more data
-        #       for complex scenes (moving fish) and less for static ones
-        #   -cq: "constant quality" setting for GPU encoder. Lower numbers (10)
-        #       prioritize high visual detail. GPU equivalent of CRF.
-        #   -crf: "constant rate factor" quality setting for CPU encoder. Lower
-        #       values (10) prioritize high visual detail. CPU equivalent of CQ
-        #   -b:v: target bitrate for output video. Set to 0 to disable default
-        #       bitrate cap and strictly follow `-cq` settings
-        #   -maxrate: maximum rate to prevent file size from exploding during
-        #       extremely complex frames
-        #   -bufsize: buffer size telling the encoder how much video to look at
-        #       when deciding how to distribute the bitrate
-        #   -preset: encoding preset; higher quality presets take longer to
-        #       encode. Use "p7" for highest quality.
-        #   -y: overwrite output file if it exists without asking permission
-        #   -map: select the output from the filter
-        #   -an: exclude audio from new file
-        #   -t: duration of the output video
-        if config['use_gpu']:
-            encoder_args = [
-                "-c:v", "h264_nvenc",
-                "-rc", "vbr",
-            ]
-            if is_auto_mode:
-                # Archival Bitrate Targeting (ABR/VBR)
-                encoder_args += ["-b:v", target_bitrate, "-maxrate", "100M", "-bufsize", "100M"]
-            else:
-                # Manual Constant Quality Override (CQP)
-                encoder_args += ["-b:v", "0", "-cq", str(config['quality_crf'])]
-            encoder_args += ["-preset", "p7"]
-        else:
-            encoder_args = [
-                "-c:v", "libx264",
-            ]
-            if is_auto_mode:
-                # Archival Bitrate Targeting (ABR)
-                encoder_args += ["-b:v", target_bitrate]
-            else:
-                # Manual Constant Rate Factor Override (CRF)
-                encoder_args += ["-crf", str(config['quality_crf'])]
-            encoder_args += ["-preset", "medium"]
-        
-        cmd = [
-            ffmpeg_exe, "-y"
-        ] + input_args + [
-            "-filter_complex", filter_str,
-            "-map", maparg,
-            "-an"
-        ] + encoder_args + [
-            "-t", str(video_duration_sec),
-            output_path
-        ]
-
-        # Run the command and log any errors
-        print("  > Clipping and stitching... This may take some time.\n", flush=True)
-        try:
-            # Add a timeout to prevent infinite hangs
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-        except subprocess.TimeoutExpired:
-            print(f"\nERROR: ffmpeg timed out on {folder_id}. Is the network drive disconnected?")
-            continue
-            
-        if result.returncode != 0:
-            with open(config['log_file'], "a") as log:
-                log.write(f"ERROR in {folder_id}: {result.stderr}\n")
-        
-        # Calculate actual metrics for the final video
-        if os.path.exists(output_path):
-            actual_size = os.path.getsize(output_path)
-            # Use `video_duration_sec` to find the actual bit rate
-            actual_bitrate = (actual_size * 8) / video_duration_sec
-            # Calculate BPP for the output file based on source resolution/fps
-            actual_bpp = actual_bitrate / (needed_files[0]['width'] * needed_files[0]['height'] * needed_files[0]['fps'])
-        else:
-            actual_size = 0
-            actual_bpp = 0
-
-        # Calculate and print elapsed time with final QC metrics
-        iter_duration = time.perf_counter() - iter_start
-        avg_bpp_src = cumulative_bpp / len(needed_files)
-        expectations_table_lines = []
-        expectations_table_lines.append(f"{' '*23} | EXPECTED {' '*7} ACTUAL")
-        expectations_table_lines.append(f"    {'-'*20}|{'-'*30}")
-        expectations_table_lines.append(f"    OUTPUT FILE SIZE    | {cumulative_size / (2**30):.2f} GB {' ':<4} --> {actual_size / (2**30):.2f} GB")
-        expectations_table_lines.append(f"    BITRATE             | {int(target_bitrate)/1_000_000:.2f} Mbps {' ':<1} --> {actual_bitrate/1_000_000:.2f} Mbps")
-        expectations_table_lines.append(f"    INFORMATION DENSITY | {avg_bpp_src:.4f} BPP {' ':<1} --> {actual_bpp:.4f} BPP")
-        expectations_table_str = "\n".join(expectations_table_lines) +"\n"
-        if iter_duration > 60:
-            print(f"  > Created {f"{folder_id}{config['video_extension']}"} in {iter_duration/60:.2f} minutes.\n", flush=True)
-        else:
-            print(f"  > Created {f"{folder_id}{config['video_extension']}"} in {iter_duration:.2f} seconds.\n", flush=True)
-        print("    Output file metrics versus expectations:\n", flush=True)
-        print(expectations_table_str, flush=True)
-
-        # Check expectations
-        is_bpp_ideal_80 = avg_bpp_src * 0.80 <= actual_bpp <= avg_bpp_src * 1.20
-        is_size_ideal_80 = cumulative_size * 0.80 <= actual_size <= cumulative_size * 1.20
-        is_bpp_ideal_90 = avg_bpp_src * 0.90 <= actual_bpp <= avg_bpp_src * 1.10
-        is_size_ideal_90 = cumulative_size * 0.90 <= actual_size <= cumulative_size * 1.10
-
-        # Add to log file
-        with open(config['log_file'], "a") as log:
-            log.write(f"SUMMARY OF FOLDER {folder_id}:\n")
-            log.write(f"    Estimated output video size without visual quality loss: {cumulative_size / (2**30):.2f} GB\n")
-            log.write(f"    Estimated target bitrate to maintain visual fidelity: {int(target_bitrate)/1_000_000:.2f} Mbps\n")
-            log.write(f"    Average information density of original videos: {avg_bpp_src:.4f} bits per pixel (BPP)\n\n")
-            log.write(' '*30 + '* '*10 + '\n\n')
-            log.write(f"    Output video file size: {actual_size / (2**30):.2f} GB\n")
-            log.write(f"    Output video bitrate:   {actual_bitrate/1_000_000:.2f} Mbps\n")
-            log.write(f"    Information density:    {actual_bpp:.4f} BPP\n\n")
-            log.write(f"    -> Within 80% of original average BPP:  {'YES' if is_bpp_ideal_80 else 'NO  X'}\n")
-            log.write(f"    -> Within 80% of estimated file size:   {'YES' if is_size_ideal_80 else 'NO  X'}\n")
-            log.write(f"    -> Within 90% of original average BPP:  {'YES' if is_bpp_ideal_90 else 'NO  X'}\n")
-            log.write(f"    -> Within 90% of estimated file size:   {'YES' if is_size_ideal_90 else 'NO  X'}\n\n")
-
-        # Centralized multi-line notes and warnings
-        quality_note = """
-            NOTE: This utility uses a `libx264` (CPU) encoder that is generally more
-            efficient than the GoPro's internal hardware. This means you will often
-            find that an output file with a lower bitrate than the original actually
-            contains the same amount of visual information. Your target shouldn't
-            necessarily be an identical file size, but rather a file size that stays
-            within 80-90% of the original and a BPP within 80% of the original in
-            order to maintain "visually lossless" quality.
-        """
-
-        warning_90 = """
-            WARNING: Output video is NOT within 90% of the original BPP and/or file
-                     size. Output may be too small (quality loss) or too large (wasted
-                     space).
-        """
-
-        warning_80 = """
-            WARNING: Output video is NOT within 80% of the original BPP and/or file
-                     size. Output may be too small (quality loss) or too large (wasted
-                     space).
-        """
-
-        if not all([is_bpp_ideal_90, is_size_ideal_90]):
-            log_and_print(warning_90, config['log_file'])
-            log_and_print(quality_note, config['log_file'])
-        elif not all([is_bpp_ideal_80, is_size_ideal_80]):
-            log_and_print(warning_80, config['log_file'])
-            log_and_print(quality_note, config['log_file'])
+    # FINAL CLOUD UPLOAD RETRY SWEEP
+    if failed_uploads:
+        print(f"\n  > Attempting final sweep of {len(failed_uploads)} failed uploads...")
+        for path in failed_uploads:
+            retry = subprocess.run([gcloud_exec, "storage", "cp", path, config['gcp_bucket_path']])
+            # If the retry fails, mark overall success as False
+            if retry.returncode != 0:
+                overall_success = False
+            elif config.get('delete_local_after_upload'):
+                os.remove(path)
 
     # Add space to end of log file for readability between runs
     with open(config['log_file'], "a") as log:
         log.write("\n\n\n")
 
+    return overall_success
+
 if __name__ == "__main__":
     # Parse command-line arguments
     args = parse_args()
 
-    # Launch the script
-    process_deployments(config_path=args.config_path)
-    print("Processing Complete. Check processing_log.txt for details.")
+    # Launch the script and only print success message if it returns True
+    if process_deployments(config_path=args.config_path):
+        print("Processing Complete. Check processing_log.txt for details.")
