@@ -163,7 +163,7 @@ def check_gcp_auth(bucket_path):
         result = subprocess.run([gcloud_exec, "storage", "ls", bucket_path], capture_output=True, text=True)
         
         if result.returncode != 0:
-            print(f"\nERROR: GCP Authentication failed or bucket inaccessible.")
+            print("\nERROR: GCP Authentication failed or bucket inaccessible.")
             print(f"Details: {result.stderr.strip()}")
             return False
         return True
@@ -726,7 +726,8 @@ def process_deployments(config_path='configurations.yml'):
     except UnicodeDecodeError:
         df = pd.read_csv(config['csv_path'], encoding='ISO-8859-1')
     if len(df) == 0:
-        print("ERROR: CSV file appears to be empty."); return False
+        print("ERROR: CSV file appears to be empty.")
+        return False
 
     # Clean and append to CSV
     df.columns = df.columns.str.strip()
@@ -735,12 +736,13 @@ def process_deployments(config_path='configurations.yml'):
 
     # Check for duplicates in foldername
     if df[config['col_foldername']].duplicated().any():
-        print("ERROR: Duplicate folder names found in CSV. Aborting."); return False
+        print("ERROR: Duplicate folder names found in CSV. Aborting.")
+        return False
 
     # Worker Pool Management
     num_workers = config.get('num_workers', 1)
     if config.get('use_gpu') and num_workers > 3:
-        print(f"  > GPU mode enabled. Capping concurrent workers at 3 for stability.")
+        print("  > GPU mode enabled. Capping concurrent workers at 3 for stability.")
         num_workers = 3
 
     # Launch the parallel executor
