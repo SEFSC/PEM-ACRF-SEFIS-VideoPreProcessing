@@ -82,6 +82,29 @@ def load_config(config_path='configurations.yml'):
     with open(config_path, 'r') as f:
         return yaml.safe_load(f)
 
+def get_gpu_type():
+    """
+    Queries nvidia-smi to determine if the installed GPU is a 'Professional' 
+    model with unlimited/high session limits.
+    """
+    try:
+        # Query the GPU name directly from NVIDIA driver
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+            capture_output=True, text=True, check=True
+        )
+        gpu_name = result.stdout.lower()
+        
+        # Identifiers for Professional/Qualified hardware
+        pro_identifiers = ['rtx 6000', 'rtx 5000', 'quadro', 'tesla', 'a-series', 'ada generation']
+        
+        if any(ident in gpu_name for ident in pro_identifiers):
+            return "PRO"
+        return "CONSUMER"
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        # Default to consumer if nvidia-smi fails or isn't found
+        return "UNKNOWN"
+
 def get_video_metadata(file_path, ffprobe_path):
     """Uses ffprobe to get internal metadata of a video file.
     
@@ -271,9 +294,9 @@ def get_gopro_sort_key(filename):
 
 def process_single_deployment(row, config, ffmpeg_exe, ffprobe_exe):
     """Standalone task for processing one deployment."""
-    # Start timer for this video
-    iter_start = time.perf_counter()
-
+    # Start timer for this video for diagnostic mode
+    if config.get('diagnostic_mode'):
+        iter_start = time.perf_counter()
     folder_id = str(row[config['col_foldername']]).strip()
     time_bottom_ceil = str(row['timebottom_ceil']).strip()
 
@@ -283,7 +306,6 @@ def process_single_deployment(row, config, ffmpeg_exe, ffprobe_exe):
         with open(config['log_file'], "a") as log:
             log.write(f"SKIP: Folder {folder_path} not found.\n")
         return {"status": "SKIP", "folder_id": folder_id}
-
     output_path = os.path.join(config['output_directory'],
                                f"{folder_id}{config['video_extension']}")
 
@@ -315,7 +337,8 @@ def process_single_deployment(row, config, ffmpeg_exe, ffprobe_exe):
     video_files.sort(key=get_gopro_sort_key)
 
     # Get file duration from the metadata
-    print(f"\n  > Probing metadata for {len(video_files)} videos in {folder_id}...", flush=True)
+    if config.get('diagnostic_mode'):
+        print(f"\n  > Probing metadata for {len(video_files)} video chapters in {folder_id}...", flush=True)
     file_data = []
     for f in video_files:
         full_p = os.path.join(folder_path, f)
@@ -337,7 +360,8 @@ def process_single_deployment(row, config, ffmpeg_exe, ffprobe_exe):
     
     # Check the start times and durations of each video to determine which
     # files are needed to stitch together and where to clip partial videos
-    print("  > Determining needed files and trim points...", flush=True)
+    if config.get('diagnostic_mode'):
+        print("  > Determining needed files and trim points...", flush=True)
     cumulative_time = 0
     needed_files = []
     for data in file_data:
@@ -406,7 +430,7 @@ def process_single_deployment(row, config, ffmpeg_exe, ffprobe_exe):
     # fidelity
     target_bitrate = f"{int(cumulative_size * 8 / video_duration_sec)}"
     is_auto_mode = str(config['quality_crf']).lower() == 'auto'
-    if is_auto_mode:
+    if is_auto_mode and config.get('diagnostic_mode'):
         print(f"  > Targeting bitrate {int(target_bitrate)/1_000_000:.2f} Mbps to match source density.", flush=True)
 
     # Build the filter string: e.g., `[0:v][1:v]concat=n=2:v=1[outv]`:
@@ -551,7 +575,6 @@ def process_single_deployment(row, config, ffmpeg_exe, ffprobe_exe):
     ]
 
     # Run the command and log any errors
-    print("  > Clipping and stitching... This may take some time.\n", flush=True)
     try:
         # Add a timeout to prevent infinite hangs
         timeout_val = int(config['timeout_minutes']) * 60 if config.get('timeout_minutes') else None
@@ -576,8 +599,7 @@ def process_single_deployment(row, config, ffmpeg_exe, ffprobe_exe):
         actual_size = 0
         actual_bpp = 0
 
-    # Calculate and print elapsed time with final QC metrics
-    iter_duration = time.perf_counter() - iter_start
+    # Calculate final QC metrics
     avg_bpp_src = cumulative_bpp / len(needed_files)
     expectations_table_lines = []
     expectations_table_lines.append(f"{' '*23} | EXPECTED {' '*7} ACTUAL")
@@ -586,12 +608,14 @@ def process_single_deployment(row, config, ffmpeg_exe, ffprobe_exe):
     expectations_table_lines.append(f"    BITRATE             | {int(target_bitrate)/1_000_000:.2f} Mbps {' ':<1} --> {actual_bitrate/1_000_000:.2f} Mbps")
     expectations_table_lines.append(f"    INFORMATION DENSITY | {avg_bpp_src:.4f} BPP {' ':<1} --> {actual_bpp:.4f} BPP")
     expectations_table_str = "\n".join(expectations_table_lines) +"\n"
-    if iter_duration > 60:
-        print(f"  > Created {f'{folder_id}{config['video_extension']}'} in {iter_duration/60:.2f} minutes.\n", flush=True)
-    else:
-        print(f"  > Created {f'{folder_id}{config['video_extension']}'} in {iter_duration:.2f} seconds.\n", flush=True)
-    print("    Output file metrics versus expectations:\n", flush=True)
-    print(expectations_table_str, flush=True)
+    if config.get('diagnostic_mode'):
+        iter_duration = time.perf_counter() - iter_start
+        if iter_duration > 60:
+            print(f"  > Created {folder_id}{config['video_extension']} in {iter_duration/60:.2f} minutes.\n", flush=True)
+        else:
+            print(f"  > Created {folder_id}{config['video_extension']} in {iter_duration:.2f} seconds.\n", flush=True)
+        print("    Output file metrics versus expectations:\n", flush=True)
+        print(expectations_table_str, flush=True)
 
     # Check expectations
     is_bpp_ideal_80 = avg_bpp_src * 0.80 <= actual_bpp <= avg_bpp_src * 1.20
@@ -671,18 +695,42 @@ def process_deployments(config_path='configurations.yml'):
     
     # SETTINGS THAT CAN ALSO BE OVERRIDDEN IN THE YAML CONFIG FILE
     config['clear_log'] = config.get('clear_log', False)
+    config['delete_local_after_upload'] = config.get('delete_local_after_upload', False)
     config['diagnostic_mode'] = config.get('diagnostic_mode', False)
+    config['gcp_upload'] = config.get('gcp_upload', False)
     config['log_file'] = config.get('log_file', 'processing_log.txt')
+    config['min_gb_required'] = config.get('min_gb_required', 10)
+    config['num_workers'] = config.get('num_workers', 1)
     config['preread_time_minutes'] = config.get('preread_time_minutes', 8)
+    config['quality_crf'] = config.get('quality_crf', 'auto')
     config['reprocess'] = config.get('reprocess', False)
     config['timeout_minutes'] = config.get('timeout_minutes', 60)
     config['use_gpu'] = config.get('use_gpu', False)
     config['video_duration_minutes'] = config.get('video_duration_minutes', 24)
     config['video_extension'] = config.get('video_extension', '.MP4')
-    config['min_gb_required'] = config.get('min_gb_required', 10)
-    config['quality_crf'] = config.get('quality_crf', 'auto')
-    config['gcp_upload'] = config.get('gcp_upload', False)
-    config['delete_local_after_upload'] = config.get('delete_local_after_upload', False)
+
+    # CONSTRAIN PROCESSING TO HARDWARE CAPABILITIES
+    # Number of CPUs and type of GPUs available, if applicable
+    max_cpu = os.cpu_count() or 1
+    gpu_status = get_gpu_type() if config['use_gpu'] else "N/A"
+
+    # Avoid CPU bottlenecking GPU: for professional GPUs, cap at core count.
+    # Consumer cards (e.g., laptops) capped at 12 by NVIDIA driver.
+    if config['use_gpu']:
+        if gpu_status == "PRO":
+            max_allowed = max_cpu 
+        else:
+            max_allowed = 12
+        if config['num_workers'] > max_allowed:
+            print(f"NOTICE: num_workers ({config['num_workers']}) exceeds hardware "
+                  f"safety limit for {gpu_status} GPU. Capping at {max_allowed}.", flush=True)
+            config['num_workers'] = max_allowed
+    else:
+        # CPU mode: Leave 1 thread for OS stability
+        max_allowed = max(1, max_cpu - 1)
+        if config['num_workers'] > max_allowed:
+            print(f"  > NOTICE: num_workers ({config['num_workers']}) exceeds hardware "
+                  f"limit ({max_cpu}). Capping at {max_allowed} for OS stability.", flush=True)
 
     # 1. SETUP & VALIDATION
     os.makedirs(config['output_directory'], exist_ok=True)
@@ -741,19 +789,19 @@ def process_deployments(config_path='configurations.yml'):
 
     # Worker Pool Management
     num_workers = config.get('num_workers', 1)
-    if config.get('use_gpu') and num_workers > 3:
-        print("  > GPU mode enabled. Capping concurrent workers at 3 for stability.")
-        num_workers = 3
 
     # Launch the parallel executor
     tasks = df.to_dict('records')
     failed_uploads, overall_success = [], True
     
+    print(f"  > Processing {int(df.shape[0])} deployments. This may take some time.\n", flush=True)
     with ProcessPoolExecutor(max_workers=num_workers) as executor:
         futures = {executor.submit(
             process_single_deployment, row, config, ffmpeg_exe, ffprobe_exe): row for row in tasks}
         
-        for future in tqdm(as_completed(futures), total=len(futures), desc="Total Progress"):
+        custom_format = "{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt}"
+        pbar = tqdm(as_completed(futures), total=len(futures), desc="Total Progress", bar_format=custom_format)
+        for future in pbar:
             result = future.result()
             # If any worker fails, the overall success is False
             if result['status'] == "ERROR":
@@ -776,12 +824,23 @@ def process_deployments(config_path='configurations.yml'):
     with open(config['log_file'], "a") as log:
         log.write("\n\n\n")
 
-    return overall_success
+    return (overall_success, os.path.basename(config['log_file']))
 
 if __name__ == "__main__":
     # Parse command-line arguments
     args = parse_args()
 
+    # Script timer
+    script_start = time.perf_counter()
+
     # Launch the script and only print success message if it returns True
-    if process_deployments(config_path=args.config_path):
-        print("Processing Complete. Check processing_log.txt for details.")
+    success, log = process_deployments(config_path=args.config_path)
+    if success:
+        script_duration = time.perf_counter() - script_start
+        if script_duration > 60:
+            runtime = f"{script_duration/60:.2f} minutes"
+        else:
+            runtime = f"{script_duration:.2f} seconds"
+        print(f"\nProcessing complete. Total runtime: {runtime}. Check "
+              f"{log} for details.", flush=True)
+
