@@ -342,11 +342,22 @@ def process_single_deployment(row, config, ffmpeg_exe, ffprobe_exe):
     file_data = []
     for f in video_files:
         full_p = os.path.join(folder_path, f)
-        dur, _, fps, br, w, h = get_video_metadata(
+        dur, _, source_fps, br, w, h = get_video_metadata(
             file_path=full_p,
             ffprobe_path=ffprobe_exe
             )
-        file_data.append({'path': full_p, 'duration': dur, 'fps': fps, 'bit_rate': br, 'width': w, 'height': h})
+        if str(config.get('fps', 'auto')).lower() == 'auto':
+            target_fps = source_fps
+        else:
+            target_fps = float(config.get('fps', 'auto'))
+        file_data.append({
+            'path': full_p,
+            'duration': dur,
+            'fps': source_fps,
+            'bit_rate': br,
+            'width': w,
+            'height': h
+        })
 
     # 4. CALCULATE TIMELINE
     # Start time is `preread_time_minutes` minutes (default 8) from the time on
@@ -355,7 +366,7 @@ def process_single_deployment(row, config, ffmpeg_exe, ffprobe_exe):
     # time
     preread_time_sec = int(config['preread_time_minutes']) * 60
     video_duration_sec = int(config['video_duration_minutes']) * 60
-    start_seconds = timestamp_to_seconds(time_bottom_ceil, fps) + preread_time_sec
+    start_seconds = timestamp_to_seconds(time_bottom_ceil, source_fps) + preread_time_sec
     end_seconds = start_seconds + video_duration_sec
     
     # Check the start times and durations of each video to determine which
@@ -438,7 +449,7 @@ def process_single_deployment(row, config, ffmpeg_exe, ffprobe_exe):
     # Force the frame rate (fps=fps={fps}) right after the concat to prevent
     # drift during the stitch. 'round=near' prevents frame drops due to math
     # drift.
-    concat_part = f"{filter_inputs}concat=n={len(needed_files)}:v=1,fps=fps={fps}:round=near[outv]"
+    concat_part = f"{filter_inputs}concat=n={len(needed_files)}:v=1,fps=fps={target_fps}:round=near[outv]"
     filter_complex_parts.append(concat_part)
     
     # Get fonts to prevent potential crashes on Windows
@@ -462,11 +473,11 @@ def process_single_deployment(row, config, ffmpeg_exe, ffprobe_exe):
         if not os.path.exists(check_path) and not sys.platform.startswith("win"):
              print("WARNING: Default font not found. Diagnostic text may fail.")
 
-        # Add a diagnostic timestamp overlay in the top-left corner of the
-        # video with format HH:MM:SS:FF
+        # Add a 1-based diagnostic timestamp overlay in the top-left corner of
+        # the video with format HH:MM:SS:FF
         drawtext_filter = (
             f"[outv]drawtext=fontfile='{font_path}':"
-            r"text='%{eif\:t/3600\:d\:2}\:%{eif\:mod(t/60,60)\:d\:2}\:%{eif\:mod(t,60)\:d\:2}\:%{eif\:" + str(fps) + r"*mod(t,1)\:d\:2}':"
+            r"text='%{eif\:t/3600\:d\:2}\:%{eif\:mod(t/60,60)\:d\:2}\:%{eif\:mod(t,60)\:d\:2}\:%{eif\:" + str(target_fps) + r"*mod(t,1)+1\:d\:2}':"
             "x=10:y=10:fontsize=48:fontcolor=white:box=1:boxcolor=black@0.5[diagout]"
         )
         filter_complex_parts.append(drawtext_filter)
@@ -491,14 +502,14 @@ def process_single_deployment(row, config, ffmpeg_exe, ffprobe_exe):
     # Content
     for i, segment in enumerate(needed_files):
         file_name = os.path.basename(segment['path'])
-        start_ts = seconds_to_timestamp(cumulative, fps)
-        source_start = seconds_to_timestamp(segment['ss'], fps)
+        start_ts = seconds_to_timestamp(cumulative, target_fps)
+        source_start = seconds_to_timestamp(segment['ss'], segment['fps'])
         
         table_lines.append(f"{start_ts:<18} | START SEGMENT     | {file_name:<17} | {source_start}")
         
         cumulative += segment['t']
-        end_ts = seconds_to_timestamp(cumulative, fps)
-        source_end = seconds_to_timestamp(segment['ss'] + segment['t'], fps)
+        end_ts = seconds_to_timestamp(cumulative, target_fps)
+        source_end = seconds_to_timestamp(segment['ss'] + segment['t'], segment['fps'])
         
         if i < len(needed_files) - 1:
             table_lines.append(f"{end_ts:<18} | SEAM / STITCH     | {file_name:<17} | {source_end}")
@@ -697,6 +708,7 @@ def process_deployments(config_path='configurations.yml'):
     config['clear_log'] = config.get('clear_log', False)
     config['delete_local_after_upload'] = config.get('delete_local_after_upload', False)
     config['diagnostic_mode'] = config.get('diagnostic_mode', False)
+    config['fps'] = config.get('fps', 'auto')
     config['gcp_upload'] = config.get('gcp_upload', False)
     config['log_file'] = config.get('log_file', 'processing_log.txt')
     config['min_gb_required'] = config.get('min_gb_required', 10)
