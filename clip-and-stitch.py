@@ -477,7 +477,7 @@ def process_single_deployment(row, config, ffmpeg_exe, ffprobe_exe):
         # the video with format HH:MM:SS:FF
         drawtext_filter = (
             f"[outv]drawtext=fontfile='{font_path}':"
-            r"text='%{eif\:t/3600\:d\:2}\:%{eif\:mod(t/60,60)\:d\:2}\:%{eif\:mod(t,60)\:d\:2}\:%{eif\:" + str(target_fps) + r"*mod(t,1)+1\:d\:2}':"
+            r"text='%{eif\:t/3600\:d\:2}\:%{eif\:mod(t/60,60)\:d\:2}\:%{eif\:mod(t,60)\:d\:2}\:%{eif\:" + str(target_fps) + r"*mod(t,1)\:d\:2}':"
             "x=10:y=10:fontsize=48:fontcolor=white:box=1:boxcolor=black@0.5[diagout]"
         )
         filter_complex_parts.append(drawtext_filter)
