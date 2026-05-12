@@ -73,7 +73,7 @@ All user options are contained in a configuration YAML file (called `configurati
 | Key                    | Description                                              |
 |:-----------------------|:---------------------------------------------------------|
 `clear_log`              | (Boolean) If true, clears the log file at the start of each run. Otherwise, appends to the existing log file. Defaults to false.
-`delete_local_after_upload` (Boolean) | If true, deletes the local copy of the created video after it is successfully uploaded to the Google Cloud bucket. Only applicable if `gcp_upload: true'. Defaults to false.
+`delete_local_after_upload` | (Boolean) If true, deletes the local copy of the created video after it is successfully uploaded to the Google Cloud bucket. Only applicable if `gcp_upload: true'. Defaults to false.
 `diagnostic_mode`        | (Boolean) If true, prints the video cut times and embeds an authoritative timestamp into the video itself to verify stitching. Defaults to false.
 `fps`                    | (int, float, or str) Desired frame rate (frames per second) of the output video. Set this if a different frame is desired than that of the input videos. Set to "auto" to match the frame rate of the input videos (default).
 `gcp_bucket_path`        | (str) Full path to a GCP bucket to push new videos after completion. Requires `gcp_upload: true`.
