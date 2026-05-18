@@ -294,6 +294,11 @@ def get_gopro_sort_key(filename):
 
 def process_single_deployment(row, config, ffmpeg_exe, ffprobe_exe):
     """Standalone task for processing one deployment."""
+    # Resolve frame rates (`source_fps` will come from video metadata)
+    time_on_bottom_fps = float(config['time_on_bottom_fps'])
+    raw_target = str(config['output_fps']).lower()
+    target_fps = source_fps if str(raw_target).lower() == 'auto' else float(raw_target)
+
     # Start timer for this video for diagnostic mode
     if config.get('diagnostic_mode'):
         iter_start = time.perf_counter()
@@ -346,10 +351,6 @@ def process_single_deployment(row, config, ffmpeg_exe, ffprobe_exe):
             file_path=full_p,
             ffprobe_path=ffprobe_exe
             )
-        if str(config.get('fps', 'auto')).lower() == 'auto':
-            target_fps = source_fps
-        else:
-            target_fps = float(config.get('fps', 'auto'))
         file_data.append({
             'path': full_p,
             'duration': dur,
@@ -361,13 +362,18 @@ def process_single_deployment(row, config, ffmpeg_exe, ffprobe_exe):
 
     # 4. CALCULATE TIMELINE
     # Start time is `preread_time_minutes` minutes (default 8) from the time on
-    # the bottom rounded up to the nearest 30 seconds
-    # End time is `video_duration_minutes` minutes (default 24) after the start
-    # time
+    # the bottom rounded up to the nearest 30 seconds. End time is
+    # `video_duration_minutes` minutes (default 24) after the start time.
+    # But both of these durations are based on a 30 FPS read, not 29.97 FPS, so
+    # we need to convert them.
     preread_time_sec = int(config['preread_time_minutes']) * 60
     video_duration_sec = int(config['video_duration_minutes']) * 60
-    start_seconds = timestamp_to_seconds(time_bottom_ceil, source_fps) + preread_time_sec
-    end_seconds = start_seconds + video_duration_sec
+
+    time_scaling = time_on_bottom_fps / source_fps
+    
+    start_seconds = timestamp_to_seconds(time_bottom_ceil, time_on_bottom_fps) * time_scaling
+    start_seconds += (preread_time_sec * time_scaling)
+    end_seconds = start_seconds + (video_duration_sec * time_scaling)
     
     # Check the start times and durations of each video to determine which
     # files are needed to stitch together and where to clip partial videos
@@ -502,13 +508,13 @@ def process_single_deployment(row, config, ffmpeg_exe, ffprobe_exe):
     # Content
     for i, segment in enumerate(needed_files):
         file_name = os.path.basename(segment['path'])
-        start_ts = seconds_to_timestamp(cumulative, target_fps)
+        start_ts = seconds_to_timestamp(cumulative / time_scaling, target_fps)
         source_start = seconds_to_timestamp(segment['ss'], segment['fps'])
         
         table_lines.append(f"{start_ts:<18} | START SEGMENT     | {file_name:<17} | {source_start}")
         
         cumulative += segment['t']
-        end_ts = seconds_to_timestamp(cumulative, target_fps)
+        end_ts = seconds_to_timestamp(cumulative / time_scaling, target_fps)
         source_end = seconds_to_timestamp(segment['ss'] + segment['t'], segment['fps'])
         
         if i < len(needed_files) - 1:
@@ -708,14 +714,15 @@ def process_deployments(config_path='configurations.yml'):
     config['clear_log'] = config.get('clear_log', False)
     config['delete_local_after_upload'] = config.get('delete_local_after_upload', False)
     config['diagnostic_mode'] = config.get('diagnostic_mode', False)
-    config['fps'] = config.get('fps', 'auto')
     config['gcp_upload'] = config.get('gcp_upload', False)
     config['log_file'] = config.get('log_file', 'processing_log.txt')
     config['min_gb_required'] = config.get('min_gb_required', 10)
     config['num_workers'] = config.get('num_workers', 1)
+    config['output_fps'] = config.get('output_fps', 'auto')
     config['preread_time_minutes'] = config.get('preread_time_minutes', 8)
     config['quality_crf'] = config.get('quality_crf', 'auto')
     config['reprocess'] = config.get('reprocess', False)
+    config['time_on_bottom_fps'] = config.get('time_on_bottom_fps', 30)
     config['timeout_minutes'] = config.get('timeout_minutes', 60)
     config['use_gpu'] = config.get('use_gpu', False)
     config['video_duration_minutes'] = config.get('video_duration_minutes', 24)
