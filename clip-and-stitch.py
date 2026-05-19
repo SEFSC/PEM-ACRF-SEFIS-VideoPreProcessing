@@ -262,18 +262,23 @@ def timestamp_to_seconds(ts_str, fps):
     return h * 3600 + m * 60 + s + (f / fps)
 
 def seconds_to_timestamp(seconds, fps):
-    """Converts total seconds (float) back to HH:MM:SS:FF format."""
-    h = int(seconds // 3600)
-    m = int((seconds % 3600) // 60)
-    s = int(seconds % 60)
-    # Convert the decimal remainder of the second into frame units
-    f = int(round((seconds % 1) * fps))
+    """
+    Converts seconds to HH:MM:SS:FF using 0-based indexing.
+    Uses flooring with epsilon to prevent rounding-induced frame jumps.
+    """
+    # Add a tiny epsilon to handle float precision issues (e.g., 14.999999 -> 15.0)
+    total_frames = int(seconds * fps + 1e-6)
     
-    # If rounding pushes frames to 30, roll it over to the next second
-    if f >= int(round(fps)):
-        f = 0
-        s += 1
-        
+    # Calculate components from total frames
+    f = total_frames % int(round(fps))
+    total_seconds = total_frames // int(round(fps))
+    
+    s = total_seconds % 60
+    total_minutes = total_seconds // 60
+    
+    m = total_minutes % 60
+    h = total_minutes // 60
+    
     return f"{h:02}:{m:02}:{s:02}:{f:02}"
 
 def get_gopro_sort_key(filename):
@@ -325,16 +330,30 @@ def process_single_deployment(row, config, ffmpeg_exe, ffprobe_exe):
     # 3. GATHER & SORT FILES
     video_files = [f for f in os.listdir(folder_path) 
                    if f.upper().endswith(config['video_extension'].upper())]
-    
-    # Skip and log if no video files are found in the folder
     if not video_files:
         with open(config['log_file'], "a") as log:
             log.write(f"SKIP: No videos in {folder_id}.\n")
         return {"status": "SKIP", "folder_id": folder_id}
-
-    # Sort by GoPro filename instead of metadata creation_time, since all
-    # file chunks have the same creation time
     video_files.sort(key=get_gopro_sort_key)
+
+    # 4. CALCULATE TIMELINE
+    # Resolve frame rates (`source_fps` will come from video metadata)
+    first_file_path = os.path.join(folder_path, video_files[0])
+    _, _, source_fps, _, _, _ = get_video_metadata(first_file_path, ffprobe_exe)
+    time_on_bottom_fps = float(config['time_on_bottom_fps'])
+    raw_target = str(config['output_fps']).lower()
+    output_fps = source_fps if str(raw_target).lower() == 'auto' else float(raw_target)
+
+    # Convert between Power Director (PD) seconds and GoPro seconds
+    time_scaling = time_on_bottom_fps / source_fps
+    
+    # Video slice times: seek using PD frame rate-derived time, then convert to actual
+    pd_start_seconds = timestamp_to_seconds(time_bottom_ceil, time_on_bottom_fps)
+    pd_start_seconds += (int(config['preread_time_minutes']) * 60)
+    pd_duration_seconds = int(config['video_duration_minutes']) * 60
+    start_seconds = (pd_start_seconds - (0.5 / time_on_bottom_fps)) * time_scaling
+    video_duration_sec = pd_duration_seconds * time_scaling
+    end_seconds = start_seconds + video_duration_sec
 
     # Get file duration from the metadata
     if config.get('diagnostic_mode'):
@@ -355,22 +374,6 @@ def process_single_deployment(row, config, ffmpeg_exe, ffprobe_exe):
             'height': h
         })
 
-    # 4. CALCULATE TIMELINE
-    # Resolve frame rates (`source_fps` will come from video metadata)
-    time_on_bottom_fps = float(config['time_on_bottom_fps'])
-    raw_target = str(config['output_fps']).lower()
-    target_fps = source_fps if str(raw_target).lower() == 'auto' else float(raw_target)
-
-    # Convert between Power Director seconds and GoPro seconds
-    time_scaling = time_on_bottom_fps / source_fps
-    
-    # Video slice times
-    start_seconds = timestamp_to_seconds(time_bottom_ceil, time_on_bottom_fps) * time_scaling
-    start_seconds += (int(config['preread_time_minutes']) * 60 * time_scaling)
-
-    video_duration_sec = int(config['video_duration_minutes']) * 60 * time_scaling
-    end_seconds = start_seconds + video_duration_sec
-    
     # Check the start times and durations of each video to determine which
     # files are needed to stitch together and where to clip partial videos
     if config.get('diagnostic_mode'):
@@ -425,16 +428,12 @@ def process_single_deployment(row, config, ffmpeg_exe, ffprobe_exe):
         # Add the input file normally
         input_args.extend(["-i", f_info['path']])
 
-        # Add a small 'epsilon' to the duration to ensure the final frame is
-        # included in the trim.
-        trim_duration = f_info['t'] + 0.1
-
         # Trim the video using start time and duration (seconds) and reset the
         # clock of the trimmed segment (`setpts`) to 0 so the stitcher sees a
         # clean sequence starting from 0.0s
         trim_label = f"[v{i}]"
         filter_complex_parts.append(
-            f"[{i}:v]trim=start={f_info['ss']}:duration={trim_duration},"
+            f"[{i}:v]trim=start={f_info['ss']}:duration={f_info['t']},"
             f"setpts=PTS-STARTPTS{trim_label}"
         )
         filter_inputs += trim_label
@@ -451,7 +450,7 @@ def process_single_deployment(row, config, ffmpeg_exe, ffprobe_exe):
     # Force the frame rate (fps=fps={fps}) right after the concat to prevent
     # drift during the stitch. 'round=near' prevents frame drops due to math
     # drift.
-    concat_part = f"{filter_inputs}concat=n={len(needed_files)}:v=1,fps=fps={target_fps}:round=near[outv]"
+    concat_part = f"{filter_inputs}concat=n={len(needed_files)}:v=1,fps=fps={output_fps}:round=near[outv]"
     filter_complex_parts.append(concat_part)
     
     # Get fonts to prevent potential crashes on Windows
@@ -475,11 +474,15 @@ def process_single_deployment(row, config, ffmpeg_exe, ffprobe_exe):
         if not os.path.exists(check_path) and not sys.platform.startswith("win"):
              print("WARNING: Default font not found. Diagnostic text may fail.")
 
-        # Add a 1-based diagnostic timestamp overlay in the top-left corner of
-        # the video with format HH:MM:SS:FF
+        # Embed a diagnostic timestamp
+        # This needs to be fudged to account for mix-matched frame rates
+        fudged_time = f"(t*{output_fps}/{time_on_bottom_fps})"
         drawtext_filter = (
             f"[outv]drawtext=fontfile='{font_path}':"
-            r"text='%{eif\:t/3600\:d\:2}\:%{eif\:mod(t/60,60)\:d\:2}\:%{eif\:mod(t,60)\:d\:2}\:%{eif\:" + str(time_on_bottom_fps) + r"*mod(t,1)\:d\:2}':"
+            r"text='%{eif\:" + fudged_time + r"/3600\:d\:2}\:" + \
+            r"%{eif\:mod(" + fudged_time + r"/60,60)\:d\:2}\:" + \
+            r"%{eif\:mod(" + fudged_time + r",60)\:d\:2}\:" + \
+            r"%{eif\:" + str(time_on_bottom_fps) + r"*mod(" + fudged_time + r",1)\:d\:2}':"
             "x=10:y=10:fontsize=48:fontcolor=white:box=1:boxcolor=black@0.5[diagout]"
         )
         filter_complex_parts.append(drawtext_filter)
@@ -491,7 +494,7 @@ def process_single_deployment(row, config, ffmpeg_exe, ffprobe_exe):
     filter_str = "; ".join(filter_complex_parts)
 
     # 6. GENERATE QC TABLE
-    cumulative = 0
+    cumulative_physical = 0
     table_lines = []
 
     # Header
@@ -504,14 +507,14 @@ def process_single_deployment(row, config, ffmpeg_exe, ffprobe_exe):
     # Content
     for i, segment in enumerate(needed_files):
         file_name = os.path.basename(segment['path'])
-        start_ts = seconds_to_timestamp(cumulative / time_scaling, target_fps)
-        source_start = seconds_to_timestamp(segment['ss'], segment['fps'])
+        start_ts = seconds_to_timestamp(cumulative_physical / time_scaling, time_on_bottom_fps)
+        source_start = seconds_to_timestamp(segment['ss'] / time_scaling, time_on_bottom_fps)
         
         table_lines.append(f"{start_ts:<18} | START SEGMENT     | {file_name:<17} | {source_start}")
         
-        cumulative += segment['t']
-        end_ts = seconds_to_timestamp(cumulative / time_scaling, target_fps)
-        source_end = seconds_to_timestamp(segment['ss'] + segment['t'], segment['fps'])
+        cumulative_physical += segment['t']
+        end_ts = seconds_to_timestamp(cumulative_physical / time_scaling, time_on_bottom_fps)
+        source_end = seconds_to_timestamp((segment['ss'] + segment['t']) / time_scaling, time_on_bottom_fps)
         
         if i < len(needed_files) - 1:
             table_lines.append(f"{end_ts:<18} | SEAM / STITCH     | {file_name:<17} | {source_end}")
