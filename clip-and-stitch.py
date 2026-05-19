@@ -294,11 +294,6 @@ def get_gopro_sort_key(filename):
 
 def process_single_deployment(row, config, ffmpeg_exe, ffprobe_exe):
     """Standalone task for processing one deployment."""
-    # Resolve frame rates (`source_fps` will come from video metadata)
-    time_on_bottom_fps = float(config['time_on_bottom_fps'])
-    raw_target = str(config['output_fps']).lower()
-    target_fps = source_fps if str(raw_target).lower() == 'auto' else float(raw_target)
-
     # Start timer for this video for diagnostic mode
     if config.get('diagnostic_mode'):
         iter_start = time.perf_counter()
@@ -361,19 +356,20 @@ def process_single_deployment(row, config, ffmpeg_exe, ffprobe_exe):
         })
 
     # 4. CALCULATE TIMELINE
-    # Start time is `preread_time_minutes` minutes (default 8) from the time on
-    # the bottom rounded up to the nearest 30 seconds. End time is
-    # `video_duration_minutes` minutes (default 24) after the start time.
-    # But both of these durations are based on a 30 FPS read, not 29.97 FPS, so
-    # we need to convert them.
-    preread_time_sec = int(config['preread_time_minutes']) * 60
-    video_duration_sec = int(config['video_duration_minutes']) * 60
+    # Resolve frame rates (`source_fps` will come from video metadata)
+    time_on_bottom_fps = float(config['time_on_bottom_fps'])
+    raw_target = str(config['output_fps']).lower()
+    target_fps = source_fps if str(raw_target).lower() == 'auto' else float(raw_target)
 
+    # Convert between Power Director seconds and GoPro seconds
     time_scaling = time_on_bottom_fps / source_fps
     
+    # Video slice times
     start_seconds = timestamp_to_seconds(time_bottom_ceil, time_on_bottom_fps) * time_scaling
-    start_seconds += (preread_time_sec * time_scaling)
-    end_seconds = start_seconds + (video_duration_sec * time_scaling)
+    start_seconds += (int(config['preread_time_minutes']) * 60 * time_scaling)
+
+    video_duration_sec = int(config['video_duration_minutes']) * 60 * time_scaling
+    end_seconds = start_seconds + video_duration_sec
     
     # Check the start times and durations of each video to determine which
     # files are needed to stitch together and where to clip partial videos
@@ -483,7 +479,7 @@ def process_single_deployment(row, config, ffmpeg_exe, ffprobe_exe):
         # the video with format HH:MM:SS:FF
         drawtext_filter = (
             f"[outv]drawtext=fontfile='{font_path}':"
-            r"text='%{eif\:t/3600\:d\:2}\:%{eif\:mod(t/60,60)\:d\:2}\:%{eif\:mod(t,60)\:d\:2}\:%{eif\:" + str(target_fps) + r"*mod(t,1)\:d\:2}':"
+            r"text='%{eif\:t/3600\:d\:2}\:%{eif\:mod(t/60,60)\:d\:2}\:%{eif\:mod(t,60)\:d\:2}\:%{eif\:" + str(time_on_bottom_fps) + r"*mod(t,1)\:d\:2}':"
             "x=10:y=10:fontsize=48:fontcolor=white:box=1:boxcolor=black@0.5[diagout]"
         )
         filter_complex_parts.append(drawtext_filter)
