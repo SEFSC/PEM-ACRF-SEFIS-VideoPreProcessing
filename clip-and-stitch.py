@@ -51,6 +51,7 @@ import os
 import re
 import sys
 import time
+import difflib
 import textwrap
 import subprocess
 from tqdm import tqdm
@@ -317,7 +318,7 @@ def seconds_to_timestamp(seconds: float | int, fps: float | int) -> str:
     
     return f"{h:02}:{m:02}:{s:02}:{f:02}"
 
-def get_gopro_sort_key(filename:str):
+def get_gopro_sort_key(filename: str):
     """
     Parses GoPro filenames for correct sorting.
 
@@ -334,6 +335,38 @@ def get_gopro_sort_key(filename:str):
         _, chapter, rec_id = match.groups()
         return (int(rec_id), int(chapter))
     return (0, 0)
+
+def validate_config(config: dict):
+    """Checks for typos in the YAML and suggests the closest valid key.
+    
+    Arguments
+    ---------
+    config (dict): dictionary of configuration settings to validate
+    """
+    VALID_KEYS = {
+        'clear_log', 'col_foldername', 'col_timebottom', 'csv_path',
+        'delete_local_after_upload', 'diagnostic_mode', 'ffmpeg_path',
+        'ffprobe_path', 'gcp_bucket_path', 'gcp_upload', 'input_directory',
+        'log_file', 'min_gb_required', 'num_workers', 'output_directory',
+        'output_fps', 'preread_time_minutes', 'quality_crf', 'reprocess', 
+        'time_on_bottom_fps', 'timeout_minutes', 'use_gpu',
+        'video_duration_minutes', 'video_extension'
+    }
+    
+    unrecognized = []
+    for key in config.keys():
+        if key not in VALID_KEYS:
+            matches = difflib.get_close_matches(key, list(VALID_KEYS), n=1, cutoff=0.6)
+            suggestion = f" (Did you mean '{matches[0]}'?)" if matches else ""
+            unrecognized.append(f"  - '{key}'{suggestion}")
+
+    if unrecognized:
+        error_msg = (
+            "\n[!] CONFIGURATION ERROR: Unrecognized settings found in YAML:\n" +
+            "\n".join(unrecognized) +
+            "\n\nPlease correct your configuration file and restart the utility."
+        )
+        raise ValueError(error_msg)
 
 # =============================================================================
 # WORKER TASK: PROCESS SINGLE DEPLOYMENT
@@ -625,21 +658,8 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
             # Manual Constant Rate Factor (CRF) override
             encoder_args += ["-crf", str(config['quality_crf'])]
         encoder_args += ["-preset", "medium"]
-    
-    #  Determine Timing Flags based on "Auto" vs "Manual"
-    if raw_target == 'auto':
-        # ARCHIVAL: Keep GoPro timing. No re-clocking.
-        fps_filter = f"fps=fps={output_fps}:round=near"
-        final_duration = video_duration_sec
-    else:
-        # VERIFICATION: Force 30.0 (or other). Re-clock every frame.
-        # setpts=N/(FPS*TB) strips old timestamps and gives every frame 
-        # a perfect 1/30s increment.
-        fps_filter = f"fps=fps={output_fps}:round=near,setpts=N/({output_fps}*TB)"
-        final_duration = pd_duration_seconds # We "squish" the video into the 1440s box
-
-    concat_part = f"{filter_inputs}concat=n={len(needed_files)}:v=1,{fps_filter}[outv]"
-    filter_complex_parts.append(concat_part)
+    filter_inputs = "".join([f"[v{i}]" for i in range(len(needed_files))])
+    concat_part = f"{filter_inputs}concat=n={len(needed_files)}:v=1,fps=fps={output_fps}:round=near[outv]"
 
     cmd = [
         ffmpeg_exe, "-y"
@@ -648,10 +668,10 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
         "-map", maparg,
         "-an"
     ] + encoder_args + [
-        "-r", str(output_fps),                # Hard-set the header rate
-        "-fps_mode", "cfr",                   # Ensure constant bitstream
-        "-video_track_timescale", "30000",    # Fix the container clock
-        "-t", str(final_duration),            # Use the resolved duration
+        "-r", str(output_fps),
+        "-fps_mode", "cfr",
+        "-video_track_timescale", "30000",
+        "-t", str(video_duration_sec),
         output_path
     ]
 
@@ -767,6 +787,7 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
 def process_deployments(config_path='configurations.yml'):
     """Orchestrates parallel processing and returns True if no critical errors occurred."""
     config = load_config(config_path.strip('"'))
+    validate_config(config=config)
     
     # SETTINGS THAT CAN ALSO BE OVERRIDDEN IN THE YAML CONFIG FILE
     config['clear_log'] = config.get('clear_log', False)
@@ -838,10 +859,6 @@ def process_deployments(config_path='configurations.yml'):
         log.write(f"{'#'*80}\n")
         log.write(f"SESSION START: {datetime.now()}\n")
         log.write(f"CONFIGURATION: {config_path}\n\n")
-        for key, value in config.items():
-            log.write(f"  -> {key}: {value}\n")
-        log.write("\n")
-        log.write(f"{'#'*80}\n\n")
 
     # Load CSV with encoding fallback
     try:
@@ -868,6 +885,13 @@ def process_deployments(config_path='configurations.yml'):
     tasks = df.to_dict('records')
     failed_uploads, overall_success = [], True
     
+    # Record configuration settings in log file
+    with open(config['log_file'], 'a') as log:
+        for key, value in config.items():
+            log.write(f"  -> {key}: {value}\n")
+        log.write("\n")
+        log.write(f"{'#'*80}\n\n")
+
     print(f"  > Processing {int(df.shape[0])} deployments. This may take some time.\n", flush=True)
     with ProcessPoolExecutor(max_workers=num_workers) as executor:
         futures = {executor.submit(
