@@ -628,12 +628,18 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     
     #  Determine Timing Flags based on "Auto" vs "Manual"
     if raw_target == 'auto':
+        # ARCHIVAL: Keep GoPro timing. No re-clocking.
         fps_filter = f"fps=fps={output_fps}:round=near"
+        final_duration = video_duration_sec
     else:
-        # N/({output_fps}*TB) re-maps every frame index to a perfect integer grid
+        # VERIFICATION: Force 30.0 (or other). Re-clock every frame.
+        # setpts=N/(FPS*TB) strips old timestamps and gives every frame 
+        # a perfect 1/30s increment.
         fps_filter = f"fps=fps={output_fps}:round=near,setpts=N/({output_fps}*TB)"
+        final_duration = pd_duration_seconds # We "squish" the video into the 1440s box
 
     concat_part = f"{filter_inputs}concat=n={len(needed_files)}:v=1,{fps_filter}[outv]"
+    filter_complex_parts.append(concat_part)
 
     cmd = [
         ffmpeg_exe, "-y"
@@ -642,10 +648,10 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
         "-map", maparg,
         "-an"
     ] + encoder_args + [
-        "-r", str(output_fps),                # Forces the header rate
-        "-fps_mode", "cfr",                   # Forces constant frame rate
-        "-video_track_timescale", "30000",    # Clean container clock
-        "-t", str(pd_duration_seconds),                # <--- CHANGE: Use the 1440s PD duration
+        "-r", str(output_fps),                # Hard-set the header rate
+        "-fps_mode", "cfr",                   # Ensure constant bitstream
+        "-video_track_timescale", "30000",    # Fix the container clock
+        "-t", str(final_duration),            # Use the resolved duration
         output_path
     ]
 
