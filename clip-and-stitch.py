@@ -1,6 +1,6 @@
 """
-GoPro Clip-and-Stitch Utility
------------------------------
+SEFIS GoPro Clip-and-Stitch Utility
+-----------------------------------
 A frame-accurate video processing tool designed for compiling survey videos
 from the Southeast Fishery Independent Survey (SEFIS). This script automates
 the extraction and concatenation of specific video segments from GoPro camera
@@ -12,14 +12,8 @@ Key Features:
     * Parallel Processing: Scales across CPU/GPU workers for bulk processing.
     * Resilient Serial Upload: Pushes new video to a GCP cloud bucket using
         `gcloud storage` after each encode.
-    * Frame-Accurate Seeking: Uses FFmpeg's `trim` and `setpts` filters to 
-        ensure exact millisecond alignment across GoPro chapter seams.
-    * NTSC Correction: Automatically handles 29.97 fps (30000/1001) 
-        timing to prevent timecode drift in long deployments.
     * Diagnostic Overlays: Provides optional burned-in timecode with 
         `HH:MM:SS:FF` format for frame-by-frame verification.
-    * GoPro Logic: Intelligently sorts chapters (GX01, GX02) to maintain 
-        chronological continuity.
 
 Usage:
     python clip-and-stitch.py path/to/name-of-configuration-file.yml
@@ -36,7 +30,7 @@ Required Dependencies:
 Author:  matt.grossi@noaa.gov with creation and refactoring assistance from
          Google Gemini Coding Partner
 Project: Southeast Fishery Independent Survey (SEFIS)
-Version: 2026.0.4
+Version: 2026.0.6
 Note:    Gemini Coding Partner was used to assist with developing this code.
          The code has been reviewed, edited, validated, and documented by NOAA
          Fisheries staff.
@@ -47,6 +41,7 @@ Note:    Gemini Coding Partner was used to assist with developing this code.
 # =============================================================================
 
 from datetime import datetime
+from typing import Literal
 import pandas as pd
 import argparse
 import shutil
@@ -68,17 +63,24 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 def parse_args():
     """Parses command-line arguments."""
     parser = argparse.ArgumentParser(description="GoPro Clip-and-Stitch Utility")
-    parser.add_argument(
-        "config_path",
-        type=str,
-        nargs="?",
+    parser.add_argument("config_path", type=str, nargs="?",
         default="configurations.yml",
         help="Path to the YAML configuration file (default: configurations.yml)"
     )
     return parser.parse_args()
 
-def load_config(config_path='configurations.yml'):
-    """Loads the YAML configuration file."""
+def load_config(config_path: str = 'configurations.yml'):
+    """
+    Loads the YAML configuration file.
+    
+    Arguments
+    ---------
+    config_path (str): The file path to the YAML configuration file. Defaults
+            to 'configurations.yml'.
+    Returns
+    -------
+    dict
+    """
     with open(config_path, 'r') as f:
         return yaml.safe_load(f)
 
@@ -86,6 +88,11 @@ def get_gpu_type():
     """
     Queries nvidia-smi to determine if the installed GPU is a 'Professional' 
     model with unlimited/high session limits.
+
+    Returns
+    -------
+    str, 'PRO' for professional grade mode, 'CONSUMER' for consumer grade, or
+    'UNKNOWN' if unknown or no GPU is found
     """
     try:
         # Query the GPU name directly from NVIDIA driver
@@ -105,20 +112,18 @@ def get_gpu_type():
         # Default to consumer if nvidia-smi fails or isn't found
         return "UNKNOWN"
 
-def get_video_metadata(file_path, ffprobe_path):
+def get_video_metadata(file_path: str, ffprobe_path: str):
     """Uses ffprobe to get internal metadata of a video file.
     
     Arguments
     ---------
-    file_path: str, path to the video file from which to extract metadata
-    ffprobe_path: str, path to the `ffprobe` executable file`
+    file_path (str): file path to the video from which to extract metadata
+    ffprobe_path (str): file path to the `ffprobe` executable
 
     Returns
     -------
-    list: [duration, creation_time, fps]
+    list: [duration, fps, bit_rate, width, height]
         duration: float, duration of the video in seconds
-        creation_time: str, creation time of the video
-            (e.g., "2024-01-01T12:00:00Z")
         fps: float, frames per second of the video
         bit_rate: int, bit rate of the video
         width: int, width of the video in pixels
@@ -136,13 +141,7 @@ def get_video_metadata(file_path, ffprobe_path):
     ]
     result = subprocess.run(cmd, capture_output=True, text=True)
     data = json.loads(result.stdout)
-    
-    # Extract duration and creation time
     duration = float(data['format']['duration'])
-    # GoPro creation_time is usually in format tags
-    creation_time = data['format'].get('tags', {})\
-                                  .get('creation_time', '1970-01-01T00:00:00Z')
-    # Get bit rate to calculate file size (bytes) if needed for logging or QC
     bit_rate = int(data['format']['bit_rate'])
     
     # Extract width and height from video stream
@@ -152,26 +151,52 @@ def get_video_metadata(file_path, ffprobe_path):
         if stream.get('codec_type') == 'video':
             width = int(stream.get('width'))
             height = int(stream.get('height'))
+            fps_str = stream.get('avg_frame_rate')
+            if '/' in fps_str:
+                num, den = map(int, fps_str.split('/'))
+                fps = num / den
+            else:
+                fps = float(fps_str)
             break
     
-    # Extract FPS from the video stream metadata
-    fps = get_fps_from_metadata(metadata=data)
+    return duration, fps, bit_rate, width, height
 
-    return duration, creation_time, fps, bit_rate, width, height
+def calculate_file_size(duration: float | int, bit_rate: float | int) -> int:
+    """Calculates the file size in bytes based on duration and bit rate.
+    
+    Arguments
+    ---------
+    duration (float or int): video duration in seconds
+    biit_rate (float or int): video bit rate
 
-def calculate_file_size(duration, bit_rate):
-    """Calculates the file size in bytes based on duration and bit rate."""
+    Returns
+    -------
+    (int) expected file size
+    """
     return int((duration * bit_rate) / 8)
 
-def log_and_print(message, log_path, indent="    "):
-    """Indents and writes a message to both console and log."""
+def log_and_print(message: str, log_path: str, indent_spaces: int = 4):
+    """Indents and writes a message to both console and log.
+    
+    Arguments
+    ---------
+    message (str): message to print and write to log file
+    log_path (str): file path to log file to populate
+    indent (int): number spaces to indent message. Defaults to 4.
+    """
+    indent = " " * indent_spaces
     clean_msg = textwrap.indent(textwrap.dedent(message).strip(), indent)
     print(clean_msg + "\n", flush=True)
     with open(log_path, "a") as log:
         log.write(clean_msg + "\n\n")
 
-def check_gcp_auth(bucket_path):
-    """Verifies Google Cloud storage access before starting."""
+def check_gcp_auth(bucket_path: str):
+    """Verifies Google Cloud storage access before starting.
+    
+    Arguments
+    ---------
+    bucket_path (str): full path to GCP storage bucket
+    """
     print(f"  > Verifying GCP access to {bucket_path}...", flush=True)
     
     # Use shutil.which to find the actual path of gcloud (handles .cmd on Windows)
@@ -196,30 +221,15 @@ def check_gcp_auth(bucket_path):
         print(f"\nERROR: An unexpected error occurred while checking GCP: {e}")
         return False
 
-def get_fps_from_metadata(metadata):
-    """
-    Parses the ffprobe JSON to find the video stream's average frame rate.
-    """
-    # Load the JSON if it's a string, or use the dict directly
-    data = json.loads(metadata) if isinstance(metadata, str) else metadata
-    
-    for stream in data.get('streams', []):
-        # Look specifically for the video stream
-        if stream.get('codec_type') == 'video':
-            fps_str = stream.get('avg_frame_rate')
-            
-            # avg_frame_rate is usually a fraction string like "30000/1001"
-            if '/' in fps_str:
-                num, den = map(int, fps_str.split('/'))
-                return num / den
-            return float(fps_str)
-            
-    return 29.97  # Fallback if no video stream is found
-
-def get_ffmpeg_command(config, tool="ffmpeg"):
+def get_ffmpeg_command(config: dict, tool: Literal["ffmpeg", "ffprobe"] = "ffmpeg"):
     """
     Finds ffmpeg or ffprobe. Checks local folder, then config, then system.
     Compatible with Windows (.exe) and Mac/Linux (no extension).
+
+    Arguments
+    ---------
+    config (dict): dictionary containing configuration parameters
+    tool ({"ffmpeg", "ffprobe"}): The executable to find. Defaults to "ffmpeg". 
     """
     # Detect the file extension based on the OS
     extension = ".exe" if sys.platform.startswith("win") else ""
@@ -240,7 +250,15 @@ def get_ffmpeg_command(config, tool="ffmpeg"):
     return tool
 
 def time_ceiling(time_str: str) -> str:
-    """Round time stamp up to the nearest 30 seconds"""
+    """Round time stamp up to the nearest 30 seconds
+    
+    Arguments
+    ---------
+    time_str (str): timestamp string formatted "HH:MM:SS:FF" to be rounded
+
+    Returns:
+    (str) Rounded timestamp formatted "HH:MM:SS:FF"
+    """
     # Strip frame from the string
     time_split, _, frame = time_str.rpartition(':')
 
@@ -255,16 +273,34 @@ def time_ceiling(time_str: str) -> str:
     
     return new_time_str
 
-def timestamp_to_seconds(ts_str, fps):
-    """Converts HH:MM:SS:FF (frames) to total seconds (float)."""
-    parts = ts_str.split(':')
+def timestamp_to_seconds(timestamp_str: str, fps: float | int) -> float:
+    """Converts HH:MM:SS:FF (frames) to total seconds (float).
+    
+    Arguments
+    ---------
+    timestamp_str (str): timestamp formatted "HH:MM:SS:FF" to be converted
+    fps (float | int): frames per second frame rate
+
+    Returns
+    (float) Total number of fractional seconds
+    """
+    parts = timestamp_str.split(':')
     h, m, s, f = map(int, parts)
     return h * 3600 + m * 60 + s + (f / fps)
 
-def seconds_to_timestamp(seconds, fps):
+def seconds_to_timestamp(seconds: float | int, fps: float | int) -> str:
     """
-    Converts seconds to HH:MM:SS:FF using 0-based indexing.
-    Uses flooring with epsilon to prevent rounding-induced frame jumps.
+    Converts seconds to HH:MM:SS:FF using 0-based indexing and small epsilon
+    flooring to prevent rounding-induced frame jumps.
+    
+    Arguments
+    ---------
+    seconds (float | int): total number of seconds
+    fps (float | int): frames per second frame rate
+
+    Returns
+    -------
+    (str) Timestamp formatted "HH:MM:SS:FF"
     """
     # Add a tiny epsilon to handle float precision issues (e.g., 14.999999 -> 15.0)
     total_frames = int(seconds * fps + 1e-6)
@@ -281,15 +317,21 @@ def seconds_to_timestamp(seconds, fps):
     
     return f"{h:02}:{m:02}:{s:02}:{f:02}"
 
-def get_gopro_sort_key(filename):
+def get_gopro_sort_key(filename:str):
     """
-    Parses GoPro filenames (e.g., GX010192.MP4) for correct sorting.
-    Returns a tuple: (Recording ID, Chapter Number)
-    Example: GX020192 -> (0192, 02)
+    Parses GoPro filenames for correct sorting.
+
+    Arguments
+    ---------
+    filename (str): Name of GoPro video file. Example: "GX010192.MP4"
+
+    Returns
+    -------
+    (tuple) (Recording ID, Chapter Number) Example: GX020192 -> (0192, 02)
     """
     match = re.search(r'([A-Z]{2})(\d{2})(\d{4})', filename.upper())
     if match:
-        prefix, chapter, rec_id = match.groups()
+        _, chapter, rec_id = match.groups()
         return (int(rec_id), int(chapter))
     return (0, 0)
 
@@ -297,10 +339,23 @@ def get_gopro_sort_key(filename):
 # WORKER TASK: PROCESS SINGLE DEPLOYMENT
 # =============================================================================
 
-def process_single_deployment(row, config, ffmpeg_exe, ffprobe_exe):
-    """Standalone task for processing one deployment."""
+def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_exe: str) -> dict:
+    """Standalone task for processing one deployment.
+    
+    Arguments
+    ---------
+    row (dict): dictionary containing video information and metadata
+    config (dict): configuration dictionary
+    ffmpeg_exe (str): file path to `ffmpeg_exe` executable
+    ffprobe_exe (str): file path to `ffprobe_exe`
+
+    Returns
+    -------
+    (dict) Dictionary containing processed folder name and processing status.
+            Example: {"status": "SUCCESS", "folder_id": "T60253001_A"}
+    """
     # Start timer for this video for diagnostic mode
-    if config.get('diagnostic_mode'):
+    if config['diagnostic_mode']:
         iter_start = time.perf_counter()
     folder_id = str(row[config['col_foldername']]).strip()
     time_bottom_ceil = str(row['timebottom_ceil']).strip()
@@ -311,8 +366,9 @@ def process_single_deployment(row, config, ffmpeg_exe, ffprobe_exe):
         with open(config['log_file'], "a") as log:
             log.write(f"SKIP: Folder {folder_path} not found.\n")
         return {"status": "SKIP", "folder_id": folder_id}
-    output_path = os.path.join(config['output_directory'],
-                               f"{folder_id}{config['video_extension']}")
+    output_path = os.path.join(
+        config['output_directory'], f"{folder_id}{config['video_extension']}"
+        )
 
     # Skip if output exists and reprocess is false
     if not config['reprocess'] and os.path.exists(output_path):
@@ -320,8 +376,8 @@ def process_single_deployment(row, config, ffmpeg_exe, ffprobe_exe):
             log.write(f"{os.path.basename(output_path)} exists and reprocess is set to False. Nothing to process. Skipping.\n")
         return {"status": "SKIP", "folder_id": folder_id}
 
-    # Skip and log any folder listed in the CSV that doesn't exist in the
-    # input directory
+    # Skip and log any folder listed in the CSV that doesn't exist in the input
+    # directory
     if not os.path.exists(folder_path):
         with open(config['log_file'], "a") as log:
             log.write(f"SKIP: Folder {folder_id} not found.\n")
@@ -339,32 +395,31 @@ def process_single_deployment(row, config, ffmpeg_exe, ffprobe_exe):
     # 4. CALCULATE TIMELINE
     # Resolve frame rates (`source_fps` will come from video metadata)
     first_file_path = os.path.join(folder_path, video_files[0])
-    _, _, source_fps, _, _, _ = get_video_metadata(first_file_path, ffprobe_exe)
+    _, source_fps, _, _, _ = get_video_metadata(file_path=first_file_path, ffprobe_path=ffprobe_exe)
     time_on_bottom_fps = float(config['time_on_bottom_fps'])
     raw_target = str(config['output_fps']).lower()
-    output_fps = source_fps if str(raw_target).lower() == 'auto' else float(raw_target)
+    output_fps = source_fps if raw_target == 'auto' else float(raw_target)
 
     # Convert between Power Director (PD) seconds and GoPro seconds
     time_scaling = time_on_bottom_fps / source_fps
     
     # Video slice times: seek using PD frame rate-derived time, then convert to actual
-    pd_start_seconds = timestamp_to_seconds(time_bottom_ceil, time_on_bottom_fps)
+    pd_start_seconds = timestamp_to_seconds(timestamp_str=time_bottom_ceil, fps=time_on_bottom_fps)
     pd_start_seconds += (int(config['preread_time_minutes']) * 60)
     pd_duration_seconds = int(config['video_duration_minutes']) * 60
+
+    # Prevent ffmpeg from skipping first frame due to floating-point rounding
     start_seconds = (pd_start_seconds - (0.5 / time_on_bottom_fps)) * time_scaling
     video_duration_sec = pd_duration_seconds * time_scaling
     end_seconds = start_seconds + video_duration_sec
 
-    # Get file duration from the metadata
-    if config.get('diagnostic_mode'):
+    # Extract video metadata
+    if config['diagnostic_mode']:
         print(f"\n  > Probing metadata for {len(video_files)} video chapters in {folder_id}...", flush=True)
     file_data = []
     for f in video_files:
         full_p = os.path.join(folder_path, f)
-        dur, _, source_fps, br, w, h = get_video_metadata(
-            file_path=full_p,
-            ffprobe_path=ffprobe_exe
-            )
+        dur, source_fps, br, w, h = get_video_metadata(file_path=full_p, ffprobe_path=ffprobe_exe)
         file_data.append({
             'path': full_p,
             'duration': dur,
@@ -376,7 +431,7 @@ def process_single_deployment(row, config, ffmpeg_exe, ffprobe_exe):
 
     # Check the start times and durations of each video to determine which
     # files are needed to stitch together and where to clip partial videos
-    if config.get('diagnostic_mode'):
+    if config['diagnostic_mode']:
         print("  > Determining needed files and trim points...", flush=True)
     cumulative_time = 0
     needed_files = []
@@ -386,11 +441,11 @@ def process_single_deployment(row, config, ffmpeg_exe, ffprobe_exe):
         
         # Check whether this file overlaps with the desired clip range
         if file_end > start_seconds and file_start < end_seconds:
-            # Store the relative start/end for THIS specific file
+            # Store the relative start/end for this specific file
             rel_start = max(0, start_seconds - file_start)
             rel_end = min(data['duration'], end_seconds - file_start)
 
-            # Calculate BPP for the current chapter
+            # Calculate bits per pixel (BPP) for the current chapter
             bpp = data['bit_rate'] / (data['width'] * data['height'] * data['fps'])
             
             needed_files.append({
@@ -412,8 +467,7 @@ def process_single_deployment(row, config, ffmpeg_exe, ffprobe_exe):
             log.write(f"SKIP: {folder_id} - No footage found for the requested time window.\n")
         return {"status": "SKIP", "folder_id": folder_id}
 
-    # 5. FFmpeg COMMAND
-    # Trim each file individually before stitching
+    # 5. CLIP AND STITCH
     # See https://ffmpeg.org/ffmpeg.html
     cumulative_size = 0
     cumulative_bpp = 0
@@ -421,11 +475,8 @@ def process_single_deployment(row, config, ffmpeg_exe, ffprobe_exe):
     filter_complex_parts = []
     filter_inputs = ""
     for i, f_info in enumerate(needed_files):
-        # Update cumulative statistics
         cumulative_size += f_info['size']
         cumulative_bpp += f_info['bpp']
-
-        # Add the input file normally
         input_args.extend(["-i", f_info['path']])
 
         # Trim the video using start time and duration (seconds) and reset the
@@ -442,7 +493,7 @@ def process_single_deployment(row, config, ffmpeg_exe, ffprobe_exe):
     # fidelity
     target_bitrate = f"{int(cumulative_size * 8 / video_duration_sec)}"
     is_auto_mode = str(config['quality_crf']).lower() == 'auto'
-    if is_auto_mode and config.get('diagnostic_mode'):
+    if is_auto_mode and config['diagnostic_mode']:
         print(f"  > Targeting bitrate {int(target_bitrate)/1_000_000:.2f} Mbps to match source density.", flush=True)
 
     # Build the filter string: e.g., `[0:v][1:v]concat=n=2:v=1[outv]`:
@@ -450,32 +501,33 @@ def process_single_deployment(row, config, ffmpeg_exe, ffprobe_exe):
     # Force the frame rate (fps=fps={fps}) right after the concat to prevent
     # drift during the stitch. 'round=near' prevents frame drops due to math
     # drift.
-    concat_part = f"{filter_inputs}concat=n={len(needed_files)}:v=1,fps=fps={output_fps}:round=near[outv]"
+    concat_part = (
+        f"{filter_inputs}concat=n={len(needed_files)}:v=1,"
+        f"fps=fps={output_fps}:round=near,"
+        f"settb=1/{int(output_fps)}[outv]"
+    )
     filter_complex_parts.append(concat_part)
     
     # Get fonts to prevent potential crashes on Windows
-    if config.get('diagnostic_mode'):
+    if config['diagnostic_mode']:
         # Safeguard against missing fonts on Windows systems with OS-specific
         # font selections
         if sys.platform.startswith("win"):
-            # Windows needs the escaped colon for the drive letter
             font_path = r"C\:/Windows/Fonts/arial.ttf"
         elif sys.platform == "darwin":
-            # Standard macOS font path
             font_path = "/Library/Fonts/Arial.ttf"
         else:
-            # Standard Linux (Ubuntu/Debian) path
             font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
 
         # Check if the font actually exists before trying to use it
-        # (On Linux/Mac, we need to remove the FFmpeg escapes to check with
-        # Python)
         check_path = font_path.replace(r"C\:", "C:").replace("\\", "")
         if not os.path.exists(check_path) and not sys.platform.startswith("win"):
              print("WARNING: Default font not found. Diagnostic text may fail.")
 
-        # Embed a diagnostic timestamp
+        # Embed a diagnostic timestamp for the stitched video
         # This needs to be fudged to account for mix-matched frame rates
+        # (i.e., if time_on_bottom_fps != output_fps) in order for this time
+        # to match the media player frame rate
         fudged_time = f"(t*{output_fps}/{time_on_bottom_fps})"
         drawtext_filter = (
             f"[outv]drawtext=fontfile='{font_path}':"
@@ -496,15 +548,12 @@ def process_single_deployment(row, config, ffmpeg_exe, ffprobe_exe):
     # 6. GENERATE QC TABLE
     cumulative_physical = 0
     table_lines = []
-
-    # Header
     table_lines.append(f"\n{'='*80}")
     table_lines.append(f"{'QC SEAM INSPECTION TABLE - Folder: ' + folder_id + ' (' + str(config['video_duration_minutes']) + ' min)':^80}")
     table_lines.append(f"{'='*80}")
     table_lines.append(f"{'NEW VIDEO TIME':<18} | {'ACTION':<17} | {'SOURCE FILE':<17} | {'SOURCE TIMESTAMP'}")
     table_lines.append(f"{'-'*19}|{'-'*19}|{'-'*19}|{'-'*20}")
 
-    # Content
     for i, segment in enumerate(needed_files):
         file_name = os.path.basename(segment['path'])
         start_ts = seconds_to_timestamp(cumulative_physical / time_scaling, time_on_bottom_fps)
@@ -517,7 +566,7 @@ def process_single_deployment(row, config, ffmpeg_exe, ffprobe_exe):
         source_end = seconds_to_timestamp((segment['ss'] + segment['t']) / time_scaling, time_on_bottom_fps)
         
         if i < len(needed_files) - 1:
-            table_lines.append(f"{end_ts:<18} | SEAM / STITCH     | {file_name:<17} | {source_end}")
+            table_lines.append(f"{end_ts:<18} | STITCH SEAM       | {file_name:<17} | {source_end}")
             table_lines.append(f"{' '*18} |        |||        | {' '*17} |")
             table_lines.append(f"{' '*18} |        vvv        | {' '*17} |")
         else:
@@ -526,12 +575,10 @@ def process_single_deployment(row, config, ffmpeg_exe, ffprobe_exe):
     table_lines.append(f"{'='*80}\n")
     full_table_str = "\n".join(table_lines)
 
-    # Write the table to the log file
+    # Print and/or write the table to the log file
     with open(config['log_file'], "a") as log:
         log.write(full_table_str)
-
-    # Only print to the console if diagnostic mode is on
-    if config.get('diagnostic_mode'):
+    if config['diagnostic_mode']:
         print(full_table_str)
 
     # Build execution command
@@ -579,6 +626,15 @@ def process_single_deployment(row, config, ffmpeg_exe, ffprobe_exe):
             encoder_args += ["-crf", str(config['quality_crf'])]
         encoder_args += ["-preset", "medium"]
     
+    #  Determine Timing Flags based on "Auto" vs "Manual"
+    if raw_target == 'auto':
+        fps_filter = f"fps=fps={output_fps}:round=near"
+    else:
+        # N/({output_fps}*TB) re-maps every frame index to a perfect integer grid
+        fps_filter = f"fps=fps={output_fps}:round=near,setpts=N/({output_fps}*TB)"
+
+    concat_part = f"{filter_inputs}concat=n={len(needed_files)}:v=1,{fps_filter}[outv]"
+
     cmd = [
         ffmpeg_exe, "-y"
     ] + input_args + [
@@ -586,7 +642,10 @@ def process_single_deployment(row, config, ffmpeg_exe, ffprobe_exe):
         "-map", maparg,
         "-an"
     ] + encoder_args + [
-        "-t", str(video_duration_sec),
+        "-r", str(output_fps),                # Forces the header rate
+        "-fps_mode", "cfr",                   # Forces constant frame rate
+        "-video_track_timescale", "30000",    # Clean container clock
+        "-t", str(pd_duration_seconds),                # <--- CHANGE: Use the 1440s PD duration
         output_path
     ]
 
@@ -607,9 +666,7 @@ def process_single_deployment(row, config, ffmpeg_exe, ffprobe_exe):
     # Calculate actual metrics for the final video
     if os.path.exists(output_path):
         actual_size = os.path.getsize(output_path)
-        # Use `video_duration_sec` to find the actual bit rate
         actual_bitrate = (actual_size * 8) / video_duration_sec
-        # Calculate BPP for the output file based on source resolution/fps
         actual_bpp = actual_bitrate / (needed_files[0]['width'] * needed_files[0]['height'] * needed_files[0]['fps'])
     else:
         actual_size = 0
@@ -624,7 +681,7 @@ def process_single_deployment(row, config, ffmpeg_exe, ffprobe_exe):
     expectations_table_lines.append(f"    BITRATE             | {int(target_bitrate)/1_000_000:.2f} Mbps {' ':<1} --> {actual_bitrate/1_000_000:.2f} Mbps")
     expectations_table_lines.append(f"    INFORMATION DENSITY | {avg_bpp_src:.4f} BPP {' ':<1} --> {actual_bpp:.4f} BPP")
     expectations_table_str = "\n".join(expectations_table_lines) +"\n"
-    if config.get('diagnostic_mode'):
+    if config['diagnostic_mode']:
         iter_duration = time.perf_counter() - iter_start
         if iter_duration > 60:
             print(f"  > Created {folder_id}{config['video_extension']} in {iter_duration/60:.2f} minutes.\n", flush=True)
@@ -639,7 +696,6 @@ def process_single_deployment(row, config, ffmpeg_exe, ffprobe_exe):
     is_bpp_ideal_90 = avg_bpp_src * 0.90 <= actual_bpp <= avg_bpp_src * 1.10
     is_size_ideal_90 = cumulative_size * 0.90 <= actual_size <= cumulative_size * 1.10
 
-    # Add to log file
     with open(config['log_file'], "a") as log:
         log.write(f"SUMMARY OF FOLDER {folder_id}:\n")
         log.write(f"    Estimated output video size without visual quality loss: {cumulative_size / (2**30):.2f} GB\n")
@@ -686,13 +742,12 @@ def process_single_deployment(row, config, ffmpeg_exe, ffprobe_exe):
 
     # GCP serial upload
     upload_status = "PENDING"
-    if config.get('gcp_upload'):
-        # Upload to gcloud storage
+    if config['gcp_upload']:
         gcloud_exec = shutil.which("gcloud")
         up_res = subprocess.run([gcloud_exec, "storage", "cp", output_path, config['gcp_bucket_path']], capture_output=True)
         if up_res.returncode == 0:
             upload_status = "SUCCESS"
-            if config.get('delete_local_after_upload'):
+            if config['delete_local_after_upload']:
                 os.remove(output_path)
         else:
             upload_status = "FAILED"
@@ -705,9 +760,7 @@ def process_single_deployment(row, config, ffmpeg_exe, ffprobe_exe):
 
 def process_deployments(config_path='configurations.yml'):
     """Orchestrates parallel processing and returns True if no critical errors occurred."""
-    # Strip quotes that Windows adds when dragging/dropping files
-    config_path = config_path.strip('"')
-    config = load_config(config_path)
+    config = load_config(config_path.strip('"'))
     
     # SETTINGS THAT CAN ALSO BE OVERRIDDEN IN THE YAML CONFIG FILE
     config['clear_log'] = config.get('clear_log', False)
@@ -732,8 +785,6 @@ def process_deployments(config_path='configurations.yml'):
     max_cpu = os.cpu_count() or 1
     gpu_status = get_gpu_type() if config['use_gpu'] else "N/A"
 
-    # Avoid CPU bottlenecking GPU: for professional GPUs, cap at core count.
-    # Consumer cards (e.g., laptops) capped at 12 by NVIDIA driver.
     if config['use_gpu']:
         if gpu_status == "PRO":
             max_allowed = max_cpu 
@@ -752,17 +803,17 @@ def process_deployments(config_path='configurations.yml'):
 
     # 1. SETUP & VALIDATION
     os.makedirs(config['output_directory'], exist_ok=True)
-    total, used, free = shutil.disk_usage(config['output_directory'])
+    _, _, free = shutil.disk_usage(config['output_directory'])
     if free // (2**30) < config['min_gb_required']:
         log_and_print(f"ERROR: Insufficient disk space ({free // (2**30)}GB remaining). Stopping.", config['log_file'])
         return False
     
     # Get FFmpeg paths
-    ffmpeg_exe = get_ffmpeg_command(config, "ffmpeg")
-    ffprobe_exe = get_ffmpeg_command(config, "ffprobe")
+    ffmpeg_exe = get_ffmpeg_command(config=config, tool="ffmpeg")
+    ffprobe_exe = get_ffmpeg_command(config=config, tool="ffprobe")
 
     # Verify GCP access and settings
-    if config.get('gcp_upload'):
+    if config['gcp_upload']:
         gcloud_exec = shutil.which("gcloud")
         if 'gcp_bucket_path' not in config.keys():
             print("\nERROR: `gcp_upload` set to True but no GCP bucket was defined. Use `gcp_bucket_path` to set destination bucket.")
@@ -770,7 +821,7 @@ def process_deployments(config_path='configurations.yml'):
         if not gcloud_exec:
             print("\nERROR: 'gcloud' command not found. Is Google Cloud SDK installed?")
             return False
-        if not check_gcp_auth(config['gcp_bucket_path']):
+        if not check_gcp_auth(bucket_path=config['gcp_bucket_path']):
             return False
     elif 'gcp_bucket_path' in config.keys():
         print("\n  > WARNING: A GCP bucket was passed but `gcp_upload` is False. Videos will not be uploaded to GCP unless `gcp_upload=True`.\n", flush=True)
@@ -795,12 +846,11 @@ def process_deployments(config_path='configurations.yml'):
         print("ERROR: CSV file appears to be empty.")
         return False
 
-    # Clean and append to CSV
+    # Check and clean and append to CSV
     df.columns = df.columns.str.strip()
     df[config['col_foldername']] = df[config['col_foldername']].str.strip()
     df['timebottom_ceil'] = df[config['col_timebottom']].apply(time_ceiling)    
 
-    # Check for duplicates in foldername
     if df[config['col_foldername']].duplicated().any():
         print("ERROR: Duplicate folder names found in CSV. Aborting.")
         return False
