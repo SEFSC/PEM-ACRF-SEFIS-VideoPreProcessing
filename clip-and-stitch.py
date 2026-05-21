@@ -6,13 +6,13 @@ from the Southeast Fishery Independent Survey (SEFIS). This script automates
 the extraction and concatenation of specific video segments from GoPro camera
 folders based on "time-on-bottom" timestamps provided in a CSV file. It
 ensures seamless stitching of video segments with precise millisecond
-alignment, even across GoPro chapter seams, while also handling NTSC timing.
+alignment across GoPro chapter seams.
 
 Key Features:
     * Parallel Processing: Scales across CPU/GPU workers for bulk processing.
     * Resilient Serial Upload: Pushes new video to a GCP cloud bucket using
         `gcloud storage` after each encode.
-    * Diagnostic Overlays: Provides optional burned-in timecode with 
+    * Diagnostic Overlays: Provides optional burned-in time code with 
         `HH:MM:SS:FF` format for frame-by-frame verification.
 
 Usage:
@@ -210,7 +210,7 @@ def calculate_file_size(duration: float | int, bit_rate: float | int) -> int:
     Arguments
     ---------
     duration (float or int): video duration in seconds
-    biit_rate (float or int): video bit rate
+    bit_rate (float or int): video bit rate
 
     Returns
     -------
@@ -790,6 +790,8 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     # GCP serial upload
     upload_status = "PENDING"
     if config['gcp_upload']:
+        if config['diagnostic_mode']:
+            print(f"  > Uploading to {config['gcp_bucket_path']}...")
         gcloud_exec = shutil.which("gcloud")
         up_res = subprocess.run([gcloud_exec, "storage", "cp", output_path, config['gcp_bucket_path']], capture_output=True)
         if up_res.returncode == 0:
@@ -875,6 +877,11 @@ def process_deployments(config_path: str = 'configurations.yml', process=True):
     mode = "w" if config['clear_log'] else "a"
     with open(config['log_file'], mode) as log:
         log.write(f"{'#'*80}\nSESSION START: {datetime.now()}\n\n")
+        log.write(f"CONFIGURATION: {config_path}\n\n")
+        for key, value in config.items():
+                log.write(f"  -> {key}: {value}\n")
+                log.write("\n")
+                log.write(f"{'#'*80}\n\n")
 
     # Load and format CSV
     try:
@@ -927,7 +934,8 @@ def process_deployments(config_path: str = 'configurations.yml', process=True):
         gcloud_exec = shutil.which("gcloud")
         for path in failed_uploads:
             retry = subprocess.run([gcloud_exec, "storage", "cp", path, config['gcp_bucket_path']])
-            if retry.returncode != 0: overall_success = False
+            if retry.returncode != 0:
+                overall_success = False
 
     return (overall_success, os.path.basename(config['log_file']))
 
