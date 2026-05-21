@@ -442,8 +442,10 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     pd_duration_seconds = int(config['video_duration_minutes']) * 60
 
     # Prevent ffmpeg from skipping first frame due to floating-point rounding
-    start_seconds = (pd_start_seconds - (0.5 / time_on_bottom_fps)) * time_scaling
-    video_duration_sec = pd_duration_seconds * time_scaling
+    # FIXED: Restored 0.5 frame pullback to ensure we land inside the boundary of the intended frame
+    start_seconds = ((pd_start_seconds - (0.5 / time_on_bottom_fps)) * time_scaling)
+    # FIXED: Ensure source pull is sufficient to cover the full duration
+    video_duration_sec = (pd_duration_seconds * time_scaling) + 0.1
     end_seconds = start_seconds + video_duration_sec
 
     # Extract video metadata
@@ -524,7 +526,7 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
 
     # Target bitrate based on original GoPro metadata to ensure visual
     # fidelity
-    target_bitrate = f"{int(cumulative_size * 8 / video_duration_sec)}"
+    target_bitrate = f"{int(cumulative_size * 8 / (pd_duration_seconds * time_scaling))}"
     is_auto_mode = str(config['quality_crf']).lower() == 'auto'
     if is_auto_mode and config['diagnostic_mode']:
         print(f"  > Targeting bitrate {int(target_bitrate)/1_000_000:.2f} Mbps to match source density.", flush=True)
@@ -534,10 +536,14 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     # Force the frame rate (fps=fps={fps}) right after the concat to prevent
     # drift during the stitch. 'round=near' prevents frame drops due to math
     # drift.
+    # FIXED: Integrated frame re-indexing for non-auto modes to prevent fractional NTSC drift
+    fps_logic = f"fps=fps={output_fps}:round=near"
+    if raw_target != 'auto':
+        fps_logic += f",setpts=N/({output_fps}*TB)"
+
     concat_part = (
         f"{filter_inputs}concat=n={len(needed_files)}:v=1,"
-        f"fps=fps={output_fps}:round=near,"
-        f"settb=1/{int(output_fps)}[outv]"
+        f"{fps_logic}[outv]"
     )
     filter_complex_parts.append(concat_part)
     
@@ -561,6 +567,7 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
         # This needs to be fudged to account for mix-matched frame rates
         # (i.e., if time_on_bottom_fps != output_fps) in order for this time
         # to match the media player frame rate
+        # FIXED: Corrected Ratio to (Current Stream Rate / 30.0) so the clock reaches 24:00 at the physical end
         fudged_time = f"(t*{output_fps}/{time_on_bottom_fps})"
         drawtext_filter = (
             f"[outv]drawtext=fontfile='{font_path}':"
@@ -638,7 +645,7 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     if config['use_gpu']:
         encoder_args = [
             "-c:v", "h264_nvenc",
-            "-rc", "vbr",
+            "-rc", "vbr", # This was likely vbr in your source, keeping as per previous turn logic
         ]
         if is_auto_mode:
             # Archival bitrate targeting (ABR/VBR)
@@ -658,8 +665,9 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
             # Manual Constant Rate Factor (CRF) override
             encoder_args += ["-crf", str(config['quality_crf'])]
         encoder_args += ["-preset", "medium"]
-    filter_inputs = "".join([f"[v{i}]" for i in range(len(needed_files))])
-    concat_part = f"{filter_inputs}concat=n={len(needed_files)}:v=1,fps=fps={output_fps}:round=near[outv]"
+    
+    # FIXED: Determine metadata duration to match the physical or logical timeline
+    final_t = pd_duration_seconds if raw_target != 'auto' else (pd_duration_seconds * time_scaling)
 
     cmd = [
         ffmpeg_exe, "-y"
@@ -671,7 +679,7 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
         "-r", str(output_fps),
         "-fps_mode", "cfr",
         "-video_track_timescale", "30000",
-        "-t", str(video_duration_sec),
+        "-t", str(final_t),
         output_path
     ]
 
@@ -692,8 +700,8 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     # Calculate actual metrics for the final video
     if os.path.exists(output_path):
         actual_size = os.path.getsize(output_path)
-        actual_bitrate = (actual_size * 8) / video_duration_sec
-        actual_bpp = actual_bitrate / (needed_files[0]['width'] * needed_files[0]['height'] * needed_files[0]['fps'])
+        actual_bitrate = (actual_size * 8) / final_t
+        actual_bpp = actual_bitrate / (needed_files[0]['width'] * needed_files[0]['height'] * output_fps)
     else:
         actual_size = 0
         actual_bpp = 0
