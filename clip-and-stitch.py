@@ -804,26 +804,20 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     upload_status = "PENDING"
     if config.get('gcp_upload') and process:
         try:
-            from google.cloud import storage
-            client = storage.Client()
-            bucket_path = config['gcp_bucket_path'].replace("gs://", "").strip("/")
-            bucket_name = bucket_path.split("/")[0]
-            prefix = "/".join(bucket_path.split("/")[1:])
-            blob_name = f"{prefix}/{os.path.basename(output_path)}" if prefix else os.path.basename(output_path)
+            gcloud_exec = shutil.which("gcloud")
+            cmd_up = [
+                gcloud_exec, "storage", "cp", 
+                output_path, 
+                config['gcp_bucket_path']
+            ]
+            up_res = subprocess.run(cmd_up, capture_output=True, text=True)
             
-            bucket = client.bucket(bucket_name)
-            blob = bucket.blob(blob_name)
-            file_size = os.path.getsize(output_path)
-
-            # Positioned status bar
-            show_bar = config['num_workers'] <= 20
-            with tqdm(total=file_size, unit='B', unit_scale=True, 
-                      desc=f"  -> Uploading {folder_id}", position=pbar_pos, leave=False, disable=not show_bar) as up_pbar:
-                blob.upload_from_filename(output_path, callback=lambda b: up_pbar.update(b))
-            
-            upload_status = "SUCCESS"
-            if config.get('delete_local_after_upload'):
-                os.remove(output_path)
+            if up_res.returncode == 0:
+                upload_status = "SUCCESS"
+                if config.get('delete_local_after_upload'):
+                    os.remove(output_path)
+            else:
+                upload_status = f"FAILED: {up_res.stderr}"
         except Exception as e:
             upload_status = f"FAILED: {str(e)}"
 
