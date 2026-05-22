@@ -394,7 +394,7 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     ffprobe_exe (str): file path to `ffprobe_exe`
     process (bool): if False, suppresses FFmpeg execution while still logging
             for dry run troubleshooting
-    worker_id (int): vertical position for the tqdm progress bar
+    pbar_pos (int): vertical position for the tqdm progress bar
 
     Returns
     -------
@@ -432,7 +432,7 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
 
     # 3. GATHER & SORT FILES
     video_files = [f for f in os.listdir(folder_path) 
-                   if f.upper().endswith(config['video_extension'].upper())]
+                    if f.upper().endswith(config['video_extension'].upper())]
     if not video_files:
         with open(config['log_file'], "a") as log:
             log.write(f"SKIP: No videos in {folder_id}.\n")
@@ -450,20 +450,20 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     # Convert between Power Director (PD) seconds and GoPro seconds
     time_scaling = time_on_bottom_fps / source_fps
     
-    # Video slice times: seek using PD frame rate-derived time, then convert to actual
+    # Video slice times: seek using PD frame rate-derived time, then convert to
+    # actual
     pd_start_seconds = timestamp_to_seconds(timestamp_str=time_bottom_ceil, fps=time_on_bottom_fps)
     pd_start_seconds += (int(config['preread_time_minutes']) * 60)
     pd_duration_seconds = int(config['video_duration_minutes']) * 60
 
     # Prevent ffmpeg from skipping first frame due to floating-point rounding:
-    #   -> 0.5 frame pullback with 1e-6 epsilon padding to stabilize boundary rounding
+    #   -> 0.2 frame pullback to ensure start frame inclusion
     #   -> 0.1s trailing padding buffer to prevent truncation of final frames
-    frame_pullback = 0.5
-    epsilon = 1e-6
+    nudge = 0.2 / time_on_bottom_fps
     padding = 0.1
-    start_seconds = ((pd_start_seconds - (frame_pullback / time_on_bottom_fps)) * time_scaling) + epsilon
-    video_duration_sec = (pd_duration_seconds * time_scaling) + padding
-    end_seconds = start_seconds + video_duration_sec
+    start_seconds = (pd_start_seconds - nudge) * time_scaling
+    video_duration_sec = (pd_duration_seconds * time_scaling)
+    end_seconds = start_seconds + video_duration_sec + nudge + padding
 
     # Extract video metadata
     if config['diagnostic_mode']:
@@ -580,10 +580,10 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
              print("WARNING: Default font not found. Diagnostic text may fail.")
 
         # Embed a diagnostic timestamp for the stitched video
-        # This needs to be fudged if the desired output frame rate differs from
-        # the frame rate used to determine the time-on-bottom (i.e., if
-        # if time_on_bottom_fps != output_fps) in order for this time to match
-        # the media player frame rate
+        # This needs to be "fudged" if the desired output frame rate differs
+        # from the frame rate used to determine the time-on-bottom (i.e., if
+        # time_on_bottom_fps != output_fps) in order for this time to match the
+        # media player frame rate
         fudged_time = f"(t*{output_fps}/{time_on_bottom_fps})"
         drawtext_filter = (
             f"[outv]drawtext=fontfile='{font_path}':"
@@ -602,7 +602,8 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     filter_str = "; ".join(filter_complex_parts)
 
     # 6. GENERATE QC TABLE
-    cumulative_physical = 0
+    cumulative_output_frames = 0
+    target_total_frames = int(pd_duration_seconds * time_on_bottom_fps)
     table_lines = []
     table_lines.append(f"\n{'='*80}")
     table_lines.append(f"{'QC SEAM INSPECTION TABLE - Folder: ' + folder_id + ' (' + str(config['video_duration_minutes']) + ' min)':^80}")
@@ -611,27 +612,38 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     table_lines.append(f"{'-'*19}|{'-'*19}|{'-'*19}|{'-'*20}")
 
     for i, segment in enumerate(needed_files):
-        file_name = os.path.basename(segment['path'])
+        start_ts = seconds_to_timestamp(cumulative_output_frames / time_on_bottom_fps, time_on_bottom_fps)
+        report_ss = segment['ss'] + (nudge * time_scaling if i == 0 else 0)
+        source_start = seconds_to_timestamp(report_ss / time_scaling, time_on_bottom_fps)
+        table_lines.append(f"{start_ts:<18} | START SEGMENT     | {os.path.basename(segment['path']):<17} | {source_start}")
         
-        # Calculate timestamps using the time-on-bottom FPS for discrete frame alignment
-        start_ts = seconds_to_timestamp(cumulative_physical / time_scaling, time_on_bottom_fps)
-        source_start = seconds_to_timestamp(segment['ss'] / time_scaling, time_on_bottom_fps)
-        table_lines.append(f"{start_ts:<18} | START SEGMENT     | {file_name:<17} | {source_start}")
+        # Calculate discrete frames for THIS segment by removing the nudge from the count
+        actual_t = segment['t'] - (nudge * time_scaling if i == 0 else 0)
+        segment_frames = int(round(actual_t * segment['fps']))
         
-        # Advance cumulative source time for this segment
-        cumulative_physical += segment['t']
+        # Hard-cap to prevent padding 'leakage' into the table report
+        if (cumulative_output_frames + segment_frames) > target_total_frames:
+            segment_frames = target_total_frames - cumulative_output_frames
         
-        # Show the timestamp of the very last frame in this segment (Source End - 1 frame)
-        last_frame_relative = segment['t'] - (1.0 / source_fps)
-        end_ts = seconds_to_timestamp((cumulative_physical - (segment['t'] - last_frame_relative)) / time_scaling, time_on_bottom_fps)
-        source_end = seconds_to_timestamp((segment['ss'] + last_frame_relative) / time_scaling, time_on_bottom_fps)
+        # Last frame index
+        last_frame_idx = cumulative_output_frames + segment_frames - 1
+        end_ts = seconds_to_timestamp(last_frame_idx / time_on_bottom_fps, time_on_bottom_fps)
+        
+        # Source end
+        last_frame_rel = (segment_frames - 1) / segment['fps']
+        source_end = seconds_to_timestamp((report_ss + last_frame_rel) / time_scaling, time_on_bottom_fps)
         
         if i < len(needed_files) - 1:
-            table_lines.append(f"{end_ts:<18} | LAST FRAME        | {file_name:<17} | {source_end}")
-            table_lines.append(f"{' '*18} |     -- SEAM --    | {' '*17} |")
+            table_lines.append(f"{end_ts:<18} | LAST FRAME        | {os.path.basename(segment['path']):<17} | {source_end}")
+            table_lines.append(f"{' '*18} |      -- SEAM --   | {' '*17} |")
         else:
-            table_lines.append(f"{end_ts:<18} | VIDEO END         | {file_name:<17} | {source_end}")
+            final_end_ts = seconds_to_timestamp(target_total_frames / time_on_bottom_fps, time_on_bottom_fps)
+            table_lines.append(f"{final_end_ts:<18} | VIDEO END         | {os.path.basename(segment['path']):<17} | {source_end}")
+        
+        cumulative_output_frames += segment_frames
 
+    table_lines.append(f"{'-'*80}")
+    table_lines.append(f"TOTAL OUTPUT FRAMES: {cumulative_output_frames} / {target_total_frames}")
     table_lines.append(f"{'='*80}\n")
     full_table_str = "\n".join(table_lines)
 
@@ -815,7 +827,7 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
         except Exception as e:
             upload_status = f"FAILED: {str(e)}"
 
-    # Print and/or write the table to the log file
+    # Print table if successful
     if result.returncode == 0:
         with open(config['log_file'], "a") as log:
             log.write(full_table_str)
@@ -917,19 +929,19 @@ def process_deployments(config_path: str = 'configurations.yml', process=True):
     with ProcessPoolExecutor(max_workers=config['num_workers']) as executor:
         futures = {}
         for task_idx, row in enumerate(tasks, start=1):
-            # Vertical position for individual file progress bar
             task_pbar_pos = ((task_idx - 1) % config['num_workers']) + 1
-
             future = executor.submit(
                 process_single_deployment, 
                 row, config, ffmpeg_exe, ffprobe_exe, 
-                args.process, task_pbar_pos
+                process, task_pbar_pos
             )
             futures[future] = row
 
         for future in as_completed(futures):
             result = future.result()
             pbar.update(1)
+            
+            # Loud-Crash Logic for systemic errors
             if result['status'] == "ERROR":
                 error_msg = result.get('error_msg', 'Unknown execution error.')
                 pbar.close()
@@ -946,7 +958,7 @@ def process_deployments(config_path: str = 'configurations.yml', process=True):
                 executor.shutdown(wait=False, cancel_futures=True)
                 sys.exit(1)
                 
-            if result.get('status') == "SUCCESS" and result.get('upload_status') == "FAILED":
+            if result.get('status') == "SUCCESS" and result.get('upload_status').startswith("FAILED"):
                 failed_uploads.append(result['output_path'])
 
     # Retry any failed GCP uploads
@@ -958,7 +970,6 @@ def process_deployments(config_path: str = 'configurations.yml', process=True):
                 overall_success = False
 
     return (overall_success, os.path.basename(config['log_file']))
-
 
 if __name__ == "__main__":
     # Parse command-line arguments
