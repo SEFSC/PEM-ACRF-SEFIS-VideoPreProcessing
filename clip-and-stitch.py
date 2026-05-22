@@ -810,7 +810,8 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
                 blob.upload_from_filename(output_path, callback=lambda b: up_pbar.update(b))
             
             upload_status = "SUCCESS"
-            if config.get('delete_local_after_upload'): os.remove(output_path)
+            if config.get('delete_local_after_upload'):
+                os.remove(output_path)
         except Exception as e:
             upload_status = f"FAILED: {str(e)}"
 
@@ -911,7 +912,7 @@ def process_deployments(config_path: str = 'configurations.yml', process=True):
 
     # Total progress bar
     custom_format = "{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt}"
-    pbar = tqdm(as_completed(futures), total=len(futures), position=0, desc="Total Progress", bar_format=custom_format)
+    pbar = tqdm(total=len(tasks), position=0, desc="Total Progress", bar_format=custom_format)
 
     with ProcessPoolExecutor(max_workers=config['num_workers']) as executor:
         futures = {}
