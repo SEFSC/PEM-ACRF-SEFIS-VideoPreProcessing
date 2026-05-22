@@ -383,7 +383,7 @@ def get_gopro_sort_key(filename: str):
 # WORKER TASK: PROCESS SINGLE DEPLOYMENT
 # =============================================================================
 
-def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_exe: str, process: bool = True) -> dict:
+def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_exe: str, process: bool, pbar_pos: int) -> dict:
     """Standalone task for processing one deployment.
     
     Arguments
@@ -392,8 +392,9 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     config (dict): configuration dictionary
     ffmpeg_exe (str): file path to `ffmpeg_exe` executable
     ffprobe_exe (str): file path to `ffprobe_exe`
-    process (bool): whether to process video files. If False, only logging will
-            be carried out (for troubleshooting)
+    process (bool): if False, suppresses FFmpeg execution while still logging
+            for dry run troubleshooting
+    worker_id (int): vertical position for the tqdm progress bar
 
     Returns
     -------
@@ -789,17 +790,29 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
 
     # GCP serial upload
     upload_status = "PENDING"
-    if config['gcp_upload']:
-        if config['diagnostic_mode']:
-            print(f"  > Uploading to {config['gcp_bucket_path']}...")
-        gcloud_exec = shutil.which("gcloud")
-        up_res = subprocess.run([gcloud_exec, "storage", "cp", output_path, config['gcp_bucket_path']], capture_output=True)
-        if up_res.returncode == 0:
+    if config.get('gcp_upload') and process:
+        try:
+            from google.cloud import storage
+            client = storage.Client()
+            bucket_path = config['gcp_bucket_path'].replace("gs://", "").strip("/")
+            bucket_name = bucket_path.split("/")[0]
+            prefix = "/".join(bucket_path.split("/")[1:])
+            blob_name = f"{prefix}/{os.path.basename(output_path)}" if prefix else os.path.basename(output_path)
+            
+            bucket = client.bucket(bucket_name)
+            blob = bucket.blob(blob_name)
+            file_size = os.path.getsize(output_path)
+
+            # Positioned status bar
+            show_bar = config['num_workers'] <= 20
+            with tqdm(total=file_size, unit='B', unit_scale=True, 
+                      desc=f"  -> Uploading {folder_id}", position=pbar_pos, leave=False, disable=not show_bar) as up_pbar:
+                blob.upload_from_filename(output_path, callback=lambda b: up_pbar.update(b))
+            
             upload_status = "SUCCESS"
-            if config['delete_local_after_upload']:
-                os.remove(output_path)
-        else:
-            upload_status = "FAILED"
+            if config.get('delete_local_after_upload'): os.remove(output_path)
+        except Exception as e:
+            upload_status = f"FAILED: {str(e)}"
 
     # Print and/or write the table to the log file
     if result.returncode == 0:
@@ -876,12 +889,12 @@ def process_deployments(config_path: str = 'configurations.yml', process=True):
     # Start the log file
     mode = "w" if config['clear_log'] else "a"
     with open(config['log_file'], mode) as log:
-        log.write(f"{'#'*80}\nSESSION START: {datetime.now()}\n\n")
+        log.write(f"{'#'*80}\nSESSION START: {datetime.now()}\n")
         log.write(f"CONFIGURATION: {config_path}\n\n")
         for key, value in config.items():
-                log.write(f"  -> {key}: {value}\n")
-                log.write("\n")
-                log.write(f"{'#'*80}\n\n")
+            log.write(f"  -> {key}: {value}\n")
+        log.write("\n")
+        log.write(f"{'#'*80}\n\n")
 
     # Load and format CSV
     try:
@@ -896,22 +909,28 @@ def process_deployments(config_path: str = 'configurations.yml', process=True):
     tasks = df.to_dict('records')
     failed_uploads, overall_success = [], True
 
+    # Total progress bar
+    custom_format = "{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt}"
+    pbar = tqdm(as_completed(futures), total=len(futures), position=0, desc="Total Progress", bar_format=custom_format)
+
     with ProcessPoolExecutor(max_workers=config['num_workers']) as executor:
-        futures = {executor.submit(
-            process_single_deployment, row, config, ffmpeg_exe, ffprobe_exe, process
-            ): row for row in tasks}
-        
-        custom_format = "{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt}"
-        pbar = tqdm(as_completed(futures), total=len(futures), desc="Total Progress", bar_format=custom_format)
-        
-        for future in pbar:
+        futures = {}
+        for task_idx, row in enumerate(tasks, start=1):
+            # Vertical position for individual file progress bar
+            task_pbar_pos = ((task_idx - 1) % config['num_workers']) + 1
+
+            future = executor.submit(
+                process_single_deployment, 
+                row, config, ffmpeg_exe, ffprobe_exe, 
+                args.process, task_pbar_pos
+            )
+            futures[future] = row
+
+        for future in as_completed(futures):
             result = future.result()
-            
-            # If the worker returns an "ERROR" (FFmpeg failure), we crash immediately.
+            pbar.update(1)
             if result['status'] == "ERROR":
                 error_msg = result.get('error_msg', 'Unknown execution error.')
-                
-                # Shutdown the progress bar gracefully before the crash report
                 pbar.close()
                 
                 # Report the error loudly to the console
