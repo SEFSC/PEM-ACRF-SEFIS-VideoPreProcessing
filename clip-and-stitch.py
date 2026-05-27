@@ -4,9 +4,9 @@ SEFIS GoPro Clip-and-Stitch Utility
 A frame-accurate video processing tool designed for compiling survey videos
 from the Southeast Fishery Independent Survey (SEFIS). This script automates
 the extraction and concatenation of specific video segments from GoPro camera
-folders based on "time-on-bottom" timestamps provided in a CSV file. It
-ensures seamless stitching of video segments with precise millisecond
-alignment across GoPro chapter seams.
+folders based on "start_time" timestamps provided in a CSV file. It ensures
+seamless stitching of video segments with precise millisecond alignment across
+GoPro chapter seams.
 
 Key Features:
     * Parallel Processing: Scales across CPU/GPU workers for bulk processing.
@@ -86,12 +86,12 @@ def validate_config(config: dict):
     config (dict): dictionary of configuration settings to validate
     """
     VALID_KEYS = {
-        'clear_log', 'col_foldername', 'col_timebottom', 'csv_path',
+        'clear_log', 'col_folder_name', 'col_start_time', 'csv_path',
         'delete_local_after_upload', 'diagnostic_mode', 'ffmpeg_path',
         'ffprobe_path', 'gcp_bucket_path', 'gcp_upload', 'input_directory',
         'log_file', 'min_gb_required', 'num_workers', 'output_directory',
-        'output_fps', 'preread_time_minutes', 'quality_crf', 'reprocess', 
-        'time_on_bottom_fps', 'timeout_minutes', 'use_gpu',
+        'output_fps', 'time_buffer_minutes', 'quality_crf', 'reprocess', 
+        'start_time_fps_fps', 'timeout_minutes', 'use_gpu',
         'video_duration_minutes', 'video_extension'
     }
     
@@ -404,8 +404,8 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     # Start timer for this video for diagnostic mode
     if config['diagnostic_mode']:
         iter_start = time.perf_counter()
-    folder_id = str(row[config['col_foldername']]).strip()
-    time_bottom_ceil = str(row['timebottom_ceil']).strip()
+    folder_id = str(row[config['col_folder_name']]).strip()
+    start_time_ceil = str(row['start_time_ceil']).strip()
 
     # Input and output directories
     folder_path = os.path.join(config['input_directory'], folder_id)
@@ -443,23 +443,23 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     # Resolve frame rates (`source_fps` will come from video metadata)
     first_file_path = os.path.join(folder_path, video_files[0])
     _, source_fps, _, _, _ = get_video_metadata(file_path=first_file_path, ffprobe_path=ffprobe_exe)
-    time_on_bottom_fps = float(config['time_on_bottom_fps'])
+    start_time_fps_fps = float(config['start_time_fps_fps'])
     raw_target = str(config['output_fps']).lower()
     output_fps = source_fps if raw_target == 'auto' else float(raw_target)
 
     # Convert between Power Director (PD) seconds and GoPro seconds
-    time_scaling = time_on_bottom_fps / source_fps
+    time_scaling = start_time_fps_fps / source_fps
     
     # Video slice times: seek using PD frame rate-derived time, then convert to
     # actual
-    pd_start_seconds = timestamp_to_seconds(timestamp_str=time_bottom_ceil, fps=time_on_bottom_fps)
-    pd_start_seconds += (int(config['preread_time_minutes']) * 60)
+    pd_start_seconds = timestamp_to_seconds(timestamp_str=start_time_ceil, fps=start_time_fps_fps)
+    pd_start_seconds += (int(config['time_buffer_minutes']) * 60)
     pd_duration_seconds = int(config['video_duration_minutes']) * 60
 
     # Prevent ffmpeg from skipping first frame due to floating-point rounding:
     #   -> 0.2 frame pullback to ensure start frame inclusion
     #   -> 0.1s trailing padding buffer to prevent truncation of final frames
-    nudge = 0.2 / time_on_bottom_fps
+    nudge = 0.2 / start_time_fps_fps
     padding = 0.1
     start_seconds = (pd_start_seconds - nudge) * time_scaling
     video_duration_sec = (pd_duration_seconds * time_scaling)
@@ -581,16 +581,16 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
 
         # Embed a diagnostic timestamp for the stitched video
         # This needs to be "fudged" if the desired output frame rate differs
-        # from the frame rate used to determine the time-on-bottom (i.e., if
-        # time_on_bottom_fps != output_fps) in order for this time to match the
+        # from the frame rate used to determine the start time (i.e., if
+        # start_time_fps != output_fps) in order for this time to match the
         # media player frame rate
-        fudged_time = f"(t*{output_fps}/{time_on_bottom_fps})"
+        fudged_time = f"(t*{output_fps}/{start_time_fps_fps})"
         drawtext_filter = (
             f"[outv]drawtext=fontfile='{font_path}':"
             r"text='%{eif\:" + fudged_time + r"/3600\:d\:2}\:" + \
             r"%{eif\:mod(" + fudged_time + r"/60,60)\:d\:2}\:" + \
             r"%{eif\:mod(" + fudged_time + r",60)\:d\:2}\:" + \
-            r"%{eif\:" + str(time_on_bottom_fps) + r"*mod(" + fudged_time + r",1)\:d\:2}':"
+            r"%{eif\:" + str(start_time_fps_fps) + r"*mod(" + fudged_time + r",1)\:d\:2}':"
             "x=10:y=10:fontsize=48:fontcolor=white:box=1:boxcolor=black@0.5[diagout]"
         )
         filter_complex_parts.append(drawtext_filter)
@@ -603,7 +603,7 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
 
     # 6. GENERATE QC TABLE
     cumulative_output_frames = 0
-    target_total_frames = int(pd_duration_seconds * time_on_bottom_fps)
+    target_total_frames = int(pd_duration_seconds * start_time_fps_fps)
     table_lines = []
     table_lines.append(f"\n{'='*80}")
     table_lines.append(f"{'QC SEAM INSPECTION TABLE - Folder: ' + folder_id + ' (' + str(config['video_duration_minutes']) + ' min)':^80}")
@@ -612,9 +612,9 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     table_lines.append(f"{'-'*19}|{'-'*19}|{'-'*19}|{'-'*20}")
 
     for i, segment in enumerate(needed_files):
-        start_ts = seconds_to_timestamp(cumulative_output_frames / time_on_bottom_fps, time_on_bottom_fps)
+        start_ts = seconds_to_timestamp(cumulative_output_frames / start_time_fps_fps, start_time_fps_fps)
         report_ss = segment['ss'] + (nudge * time_scaling if i == 0 else 0)
-        source_start = seconds_to_timestamp(report_ss / time_scaling, time_on_bottom_fps)
+        source_start = seconds_to_timestamp(report_ss / time_scaling, start_time_fps_fps)
         table_lines.append(f"{start_ts:<18} | START SEGMENT     | {os.path.basename(segment['path']):<17} | {source_start}")
         
         # Calculate discrete frames for THIS segment by removing the nudge from the count
@@ -627,17 +627,17 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
         
         # Last frame index
         last_frame_idx = cumulative_output_frames + segment_frames - 1
-        end_ts = seconds_to_timestamp(last_frame_idx / time_on_bottom_fps, time_on_bottom_fps)
+        end_ts = seconds_to_timestamp(last_frame_idx / start_time_fps_fps, start_time_fps_fps)
         
         # Source end
         last_frame_rel = (segment_frames - 1) / segment['fps']
-        source_end = seconds_to_timestamp((report_ss + last_frame_rel) / time_scaling, time_on_bottom_fps)
+        source_end = seconds_to_timestamp((report_ss + last_frame_rel) / time_scaling, start_time_fps_fps)
         
         if i < len(needed_files) - 1:
             table_lines.append(f"{end_ts:<18} | LAST FRAME        | {os.path.basename(segment['path']):<17} | {source_end}")
             table_lines.append(f"{' '*18} |      -- SEAM --   | {' '*17} |")
         else:
-            final_end_ts = seconds_to_timestamp(target_total_frames / time_on_bottom_fps, time_on_bottom_fps)
+            final_end_ts = seconds_to_timestamp(target_total_frames / start_time_fps_fps, start_time_fps_fps)
             table_lines.append(f"{final_end_ts:<18} | VIDEO END         | {os.path.basename(segment['path']):<17} | {source_end}")
         
         cumulative_output_frames += segment_frames
@@ -805,13 +805,9 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     if config.get('gcp_upload') and process:
         try:
             gcloud_exec = shutil.which("gcloud")
-            cmd_up = [
-                gcloud_exec, "storage", "cp", 
-                output_path, 
-                config['gcp_bucket_path']
-            ]
-            up_res = subprocess.run(cmd_up, capture_output=True, text=True)
-            
+            up_res = subprocess.run([gcloud_exec, "storage", "cp", output_path,
+                                    config['gcp_bucket_path']],
+                                    capture_output=True, text=True)
             if up_res.returncode == 0:
                 upload_status = "SUCCESS"
                 if config.get('delete_local_after_upload'):
@@ -847,10 +843,10 @@ def process_deployments(config_path: str = 'configurations.yml', process=True):
     config['min_gb_required'] = config.get('min_gb_required', 10)
     config['num_workers'] = config.get('num_workers', 1)
     config['output_fps'] = config.get('output_fps', 'auto')
-    config['preread_time_minutes'] = config.get('preread_time_minutes', 8)
+    config['time_buffer_minutes'] = config.get('time_buffer_minutes', -2)
     config['quality_crf'] = config.get('quality_crf', 'auto')
     config['reprocess'] = config.get('reprocess', False)
-    config['time_on_bottom_fps'] = config.get('time_on_bottom_fps', 30)
+    config['start_time_fps_fps'] = config.get('start_time_fps_fps', 30)
     config['timeout_minutes'] = config.get('timeout_minutes', 60)
     config['use_gpu'] = config.get('use_gpu', False)
     config['video_duration_minutes'] = config.get('video_duration_minutes', 24)
@@ -909,8 +905,8 @@ def process_deployments(config_path: str = 'configurations.yml', process=True):
     except UnicodeDecodeError:
         df = pd.read_csv(config['csv_path'], encoding='ISO-8859-1')
     df.columns = df.columns.str.strip()
-    df[config['col_foldername']] = df[config['col_foldername']].str.strip()
-    df['timebottom_ceil'] = df[config['col_timebottom']].apply(time_ceiling)    
+    df[config['col_folder_name']] = df[config['col_folder_name']].str.strip()
+    df['start_time_ceil'] = df[config['col_start_time']].apply(time_ceiling)
 
     print(f"  > Processing {int(df.shape[0])} deployments. This may take some time.\n", flush=True)
     tasks = df.to_dict('records')
