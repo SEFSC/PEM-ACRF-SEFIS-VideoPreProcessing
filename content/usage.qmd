@@ -1,5 +1,5 @@
 ---
-title: Using the Utility
+title: Usage
 subtitle: Clipping and stitching GoPro videos from SEFIS video surveys
 metadata-files:
   - ../_metadata.yml
