@@ -1,0 +1,72 @@
+---
+title: Worfkow
+subtitle: What this tool does and how
+metadata-files:
+  - ../_metadata.yml
+order: 5
+---
+
+### SEFIS Survey
+
+SEFIS video surveys are conducted by deploying GoPro cameras onto fish traps at various locations offshore of the southeastern United States. Cameras record continuously for about an hour at a time, and the resulting video files are automatically split into 4GB chunks by GoPro to prevent data loss (hereafter, *chapters*.) Each chapter contains approximately 15 minutes of footage. While an hour of video is collected, only a single 20-minute window is currently analyzed by scientists. This window is relative to the time the trap hits the bottom, may start or stop at any time within any of the video chapters, and always spans at least two chapters. This utility finds and extracts the desired video window from the original chapters and writes it to a new video file.
+
+### Script workflow
+
+#### Timestamps
+
+There are three timestamps of interest in this workflow:
+
+1. The **time on bottom** refers to the *video time* the camera hits the bottom. This is relative to the time recording starts, which always happens while the camera is still aboard the ship. It is the primary point of reference for the video extraction.
+2. The **read start time** is the start of the 20-minute video processed ("read") by scientists. Current protocol is for this to be 10 minutes after the time on bottom, rounded up to the nearest 30 seconds.
+3. The **video start time** is the start time of the extracted video itself. Current convention is for the video to start *two minutes* prior to -- and extend two minutes beyond -- the 20-minute minute processing window. Thus, the extracted video starts **8 minutes** after the time on bottom (rounded up to the nearest 30 seconds) and ends exactly 24 minutes later.
+
+The user can provide either the time on bottom or the read start time in the CSV file. The script will calculate the video start time using the `time_buffer_minutes` key. **In order for this to work properly, be sure to set this correctly:**
+
+- If the CSV contains the **time on bottom**, `time_buffer_minutes` should be *positive* so that the extracted video starts *after* the camera reaches the bottom. In this case, `time_buffer_minutes: 8` will satisfy the current protocol of starting the video 8 minutes after reaching the bottom.
+- If the CSV contains the **read start time**, `time_buffer_minutes` should be *negative* if the extracted video is to start *before* the 20-minute read window (`time_buffer_minutes: -2` will satisfy current protocol). Alternatively, this could be set to 0 if no buffer is desired. In this case, `video_duration_minutes` should be set to 20, unless a different time window is desired.
+
+#### Frame Rates
+
+GoPro videos are recorded at approximately 29.97 frames per second (FPS)[^1], but most video software, such as [VLC](https://www.videolan.org/) and Windows Media Player, play videos at 30 FPS. This is also true of [Power Director](https://www.cyberlink.com/products/powerdirector-video-editing-software/overview_en_US.html), the video software currently used by the SEFIS team to read the survey videos. This results in a *frame rate mismatch* between the video time reported in the video software (*i.e.*, the timeline used to navigate through the video) and the amount of data actually contained in the GoPro video files. This requires scaling to achieve frame-level precision when clipping the original videos:
+
+- The CSV timestamp, regardless of what it corresponds to, is usually determined by viewing the video in Power Director (PD), so its value assumes a frame rate of 30 FPS. One must therefore calculate which frame in the actual 29.97 FPS video corresponds to the frame displayed by PD at the given timestamp.
+- Similarly, time durations (both video duration and buffer times) have been determined using PD time at 30 FPS. To achieve these desired time durations, one must calculate how much actual video is needed to achieve those requirements.
+- Similar scaling is needed to properly display the burned-in clock in diagnostic mode.
+
+The script handles all of this scaling by comparing `start_time_fps`, which specifies the frame rate at which the CSV start time was determined, to the actual frame rate of the original video extracted from the file metadata. Pulling the actual frame rate directly from the original video's metadata makes the script agnostic to camera brand used, and allowing the user to specify the frame rate used to determine the start time means any software (or any frame rate settings within particular software) can be used. **It is, however, up to the user to correctly specify this frame rate, if it differs from the 30 FPS default.** In addition, the user can opt for any frame rate for the output video as well; similar scaling will happen automatically. By default, the script produces a video with the same frame rate as the original videos being stitched together.
+
+[^1]: They actually record at 30000/1001 = 29.9700299700... FPS, the National Television System Committee broadcast standard. While black and white televisions adhered to a clean 30 FPS standard, color video was slowed slightly to 29.97 to prevent the signal from interfering with the audio.
+
+#### Resolution
+
+Clipping and stitching together video requires video encoding, the process of converting raw, uncompressed video into a compressed, digital format. How this is done depends on both the hardware (*e.g.*, CPU versus GPU, type of CPU or GPU) and software (*e.g.*, propriety software, [FFmpeg](https://ffmpeg.org/)) used. CPUs, for example, are generally highly efficient at keeping file sizes small while achieving a desired video quality, whereas GPUs often prioritize processing speed and may sacrifice file size to achieve the same video quality.
+
+While there is no way around getting different results on different machines, the variations can be minimized. This script, by default, does two things to combat this while preserving *visual video quality* to support scientific analysis:
+
+1. Extracts the bitrate, the amount of digital data per unit time, from the metadata of the original video and combines that with the desired output video duration to calculate a **target file size** for the new video
+2. Calculates a **target bitrate** based on the target file size and the required temporal duration of the new video
+
+These target values are used to constrain the encoding tool which helps prevent video quality degradation by retaining, to the extent possible, the same amount of information per pixel, or information density, as the original videos.
+
+This default behavior can be overwritten by setting the `quality_crf` in configuration file. This uses a Constant Rate Factor (CFR) to control video encoding instead. Lower values mean better quality: 18 is high quality, 23 is standard.
+
+Regardless of the method used, summary statistics, including target versus actual file size, bitrate, and information density, are included in the log file for each video produced. The script checks whether or not the information density of the output video is within 80% and 90% of the information density of the original video and displays a warning if not. Generally, however, "auto" mode will not trigger this warning.
+
+#### Parallel processing
+
+The script natively supports parallel processing. If multiple deployments are to be processed, the machine hardware supports parallel processing, and `num_workers` is greater than 1, the workload will be distributed automatically across the available worker nodes to maximize computation resources and minimize data processing time. The script will ensure that the number passed does not exceed available resources on the machine. Rather than crash, it will automatically scale down the number of workers if needed.
+
+#### Upload to cloud bucket
+
+New videos can optionally be uploaded to a Google Cloud Project (GCP) storage bucket after creation. [See the docs](configuration.qmd) for how to configure this. When activated, files are uploaded one at a time as they are created. This avoids having to do a bulk file upload afterwards and maximizes computational resources by allowing the machine's network card to work on file upload while its CPUs/GPUs continue processing other videos.
+
+By default, new video files are also saved locally, but this can be suppressed to avoid filling up local storage.
+
+#### Other behaviors
+
+The script contains some built-in checks to ensure robustness:
+
+- Because video files can be quite large, the script verifies that there is enough disk space available in order to process the video without locking up the system. This can be set by the user (`min_gb_required`) but defaults to 10 GB.
+- If the user chooses to upload the videos to a cloud bucket after creation, the script first confirms authentication to the specified bucket and will halt before processing any video if the check fails.
+- Any videos that do not contain metadata in the CSV file are skipped and recorded in the log file. Similarly, if a timestamp is included in the CSV file but the corresponding video is not found, the video file will be noted in the log file. Neither scenario will crash the script.
+- A log file is created to store all configuration settings for a given processing run as well as summary statistics of the output videos and any warnings or errors that may not trigger a full crash. If unexpected behavior is encountered, check the log file. This file can either be appended to or rewritten. [See the docs](configuration.qmd) for details.
