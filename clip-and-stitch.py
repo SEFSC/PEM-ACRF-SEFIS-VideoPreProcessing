@@ -709,6 +709,13 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
         output_path
     ]
 
+    # Re-check free space before starting this worker's encode
+    _, _, worker_free = shutil.disk_usage(config['output_directory'])
+    if (worker_free // (2**30)) < config['min_gb_required'] and process:
+        with open(config['log_file'], "a") as log:
+            log.write(f"SKIP: {folder_id} - Disk space critical ({worker_free // (2**30)}GB left).\n")
+        return {"status": "SKIP", "folder_id": folder_id}
+
     # Run the command and log any errors
     result = MockResult()
     if process:
@@ -876,7 +883,7 @@ def process_deployments(config_path: str = 'configurations.yml', process=True):
     # Verify there is enough disk space to continue without locking up system
     os.makedirs(config['output_directory'], exist_ok=True)
     _, _, free = shutil.disk_usage(config['output_directory'])
-    if free // (2**30) < config['min_gb_required']:
+    if free // (2**30) < (config['min_gb_required'] * config['num_workers']):
         log_and_print(f"ERROR: Insufficient disk space ({free // (2**30)}GB remaining). Stopping.", config['log_file'])
         return False
     
