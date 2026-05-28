@@ -91,7 +91,7 @@ def validate_config(config: dict):
         'ffprobe_path', 'gcp_bucket_path', 'gcp_upload', 'input_directory',
         'log_file', 'min_gb_required', 'num_workers', 'output_directory',
         'output_fps', 'time_buffer_minutes', 'quality_crf', 'reprocess', 
-        'start_time_fps_fps', 'timeout_minutes', 'use_gpu',
+        'start_time_fps', 'timeout_minutes', 'use_gpu',
         'video_duration_minutes', 'video_extension'
     }
     
@@ -443,23 +443,23 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     # Resolve frame rates (`source_fps` will come from video metadata)
     first_file_path = os.path.join(folder_path, video_files[0])
     _, source_fps, _, _, _ = get_video_metadata(file_path=first_file_path, ffprobe_path=ffprobe_exe)
-    start_time_fps_fps = float(config['start_time_fps_fps'])
+    start_time_fps = float(config['start_time_fps'])
     raw_target = str(config['output_fps']).lower()
     output_fps = source_fps if raw_target == 'auto' else float(raw_target)
 
     # Convert between Power Director (PD) seconds and GoPro seconds
-    time_scaling = start_time_fps_fps / source_fps
+    time_scaling = start_time_fps / source_fps
     
     # Video slice times: seek using PD frame rate-derived time, then convert to
     # actual
-    pd_start_seconds = timestamp_to_seconds(timestamp_str=start_time_ceil, fps=start_time_fps_fps)
+    pd_start_seconds = timestamp_to_seconds(timestamp_str=start_time_ceil, fps=start_time_fps)
     pd_start_seconds += (int(config['time_buffer_minutes']) * 60)
     pd_duration_seconds = int(config['video_duration_minutes']) * 60
 
     # Prevent ffmpeg from skipping first frame due to floating-point rounding:
     #   -> 0.2 frame pullback to ensure start frame inclusion
     #   -> 0.1s trailing padding buffer to prevent truncation of final frames
-    nudge = 0.2 / start_time_fps_fps
+    nudge = 0.2 / start_time_fps
     padding = 0.1
     start_seconds = (pd_start_seconds - nudge) * time_scaling
     video_duration_sec = (pd_duration_seconds * time_scaling)
@@ -584,13 +584,13 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
         # from the frame rate used to determine the start time (i.e., if
         # start_time_fps != output_fps) in order for this time to match the
         # media player frame rate
-        fudged_time = f"(t*{output_fps}/{start_time_fps_fps})"
+        fudged_time = f"(t*{output_fps}/{start_time_fps})"
         drawtext_filter = (
             f"[outv]drawtext=fontfile='{font_path}':"
             r"text='%{eif\:" + fudged_time + r"/3600\:d\:2}\:" + \
             r"%{eif\:mod(" + fudged_time + r"/60,60)\:d\:2}\:" + \
             r"%{eif\:mod(" + fudged_time + r",60)\:d\:2}\:" + \
-            r"%{eif\:" + str(start_time_fps_fps) + r"*mod(" + fudged_time + r",1)\:d\:2}':"
+            r"%{eif\:" + str(start_time_fps) + r"*mod(" + fudged_time + r",1)\:d\:2}':"
             "x=10:y=10:fontsize=48:fontcolor=white:box=1:boxcolor=black@0.5[diagout]"
         )
         filter_complex_parts.append(drawtext_filter)
@@ -603,7 +603,7 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
 
     # 6. GENERATE QC TABLE
     cumulative_output_frames = 0
-    target_total_frames = int(pd_duration_seconds * start_time_fps_fps)
+    target_total_frames = int(pd_duration_seconds * start_time_fps)
     table_lines = []
     table_lines.append(f"\n{'='*80}")
     table_lines.append(f"{'QC SEAM INSPECTION TABLE - Folder: ' + folder_id + ' (' + str(config['video_duration_minutes']) + ' min)':^80}")
@@ -612,9 +612,9 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     table_lines.append(f"{'-'*19}|{'-'*19}|{'-'*19}|{'-'*20}")
 
     for i, segment in enumerate(needed_files):
-        start_ts = seconds_to_timestamp(cumulative_output_frames / start_time_fps_fps, start_time_fps_fps)
+        start_ts = seconds_to_timestamp(cumulative_output_frames / start_time_fps, start_time_fps)
         report_ss = segment['ss'] + (nudge * time_scaling if i == 0 else 0)
-        source_start = seconds_to_timestamp(report_ss / time_scaling, start_time_fps_fps)
+        source_start = seconds_to_timestamp(report_ss / time_scaling, start_time_fps)
         table_lines.append(f"{start_ts:<18} | START SEGMENT     | {os.path.basename(segment['path']):<17} | {source_start}")
         
         # Calculate discrete frames for THIS segment by removing the nudge from the count
@@ -627,17 +627,17 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
         
         # Last frame index
         last_frame_idx = cumulative_output_frames + segment_frames - 1
-        end_ts = seconds_to_timestamp(last_frame_idx / start_time_fps_fps, start_time_fps_fps)
+        end_ts = seconds_to_timestamp(last_frame_idx / start_time_fps, start_time_fps)
         
         # Source end
         last_frame_rel = (segment_frames - 1) / segment['fps']
-        source_end = seconds_to_timestamp((report_ss + last_frame_rel) / time_scaling, start_time_fps_fps)
+        source_end = seconds_to_timestamp((report_ss + last_frame_rel) / time_scaling, start_time_fps)
         
         if i < len(needed_files) - 1:
             table_lines.append(f"{end_ts:<18} | LAST FRAME        | {os.path.basename(segment['path']):<17} | {source_end}")
             table_lines.append(f"{' '*18} |      -- SEAM --   | {' '*17} |")
         else:
-            final_end_ts = seconds_to_timestamp(target_total_frames / start_time_fps_fps, start_time_fps_fps)
+            final_end_ts = seconds_to_timestamp(target_total_frames / start_time_fps, start_time_fps)
             table_lines.append(f"{final_end_ts:<18} | VIDEO END         | {os.path.basename(segment['path']):<17} | {source_end}")
         
         cumulative_output_frames += segment_frames
@@ -846,7 +846,7 @@ def process_deployments(config_path: str = 'configurations.yml', process=True):
     config['time_buffer_minutes'] = config.get('time_buffer_minutes', -2)
     config['quality_crf'] = config.get('quality_crf', 'auto')
     config['reprocess'] = config.get('reprocess', False)
-    config['start_time_fps_fps'] = config.get('start_time_fps_fps', 30)
+    config['start_time_fps'] = config.get('start_time_fps', 30)
     config['timeout_minutes'] = config.get('timeout_minutes', 60)
     config['use_gpu'] = config.get('use_gpu', False)
     config['video_duration_minutes'] = config.get('video_duration_minutes', 24)
