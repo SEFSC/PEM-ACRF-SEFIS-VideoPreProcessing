@@ -240,8 +240,6 @@ def check_gcp_auth(bucket_path: str):
     ---------
     bucket_path (str): full path to GCP storage bucket
     """
-    print(f"  > Verifying GCP access to {bucket_path}...", flush=True)
-    
     # Use shutil.which to find the actual path of gcloud (handles .cmd on Windows)
     gcloud_exec = shutil.which("gcloud")
     
@@ -467,7 +465,7 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
 
     # Extract video metadata
     if config['diagnostic_mode']:
-        print(f"\n  > Probing metadata for {len(video_files)} video chapters in {folder_id}...", flush=True)
+        tqdm.write(f"\n  > Probing metadata for {len(video_files)} video chapters in {folder_id}...")
     file_data = []
     for f in video_files:
         full_p = os.path.join(folder_path, f)
@@ -484,7 +482,7 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     # Check the start times and durations of each video to determine which
     # files are needed to stitch together and where to clip partial videos
     if config['diagnostic_mode']:
-        print("  > Determining needed files and trim points...", flush=True)
+        tqdm.write("  > Determining needed files and trim points...")
     cumulative_time = 0
     needed_files = []
     for data in file_data:
@@ -546,7 +544,7 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     target_bitrate = f"{int(cumulative_size * 8 / (pd_duration_seconds * time_scaling))}"
     is_auto_mode = str(config['quality_crf']).lower() == 'auto'
     if is_auto_mode and config['diagnostic_mode']:
-        print(f"  > Targeting bitrate {int(target_bitrate)/1_000_000:.2f} Mbps to match source density.", flush=True)
+        tqdm.write(f"  > Targeting bitrate {int(target_bitrate)/1_000_000:.2f} Mbps to match source density.")
 
     # Build the filter string: e.g., `[0:v][1:v]concat=n=2:v=1[outv]`:
     # Concatenate video (v) from files 0-n into 1 video stream.
@@ -577,7 +575,7 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
         # Check if the font actually exists before trying to use it
         check_path = font_path.replace(r"C\:", "C:").replace("\\", "")
         if not os.path.exists(check_path) and not sys.platform.startswith("win"):
-             print("WARNING: Default font not found. Diagnostic text may fail.")
+            tqdm.write("WARNING: Default font not found. Diagnostic text may fail.")
 
         # Embed a diagnostic timestamp for the stitched video
         # This needs to be "fudged" if the desired output frame rate differs
@@ -753,11 +751,11 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     if config['diagnostic_mode']:
         iter_duration = time.perf_counter() - iter_start
         if iter_duration > 60:
-            print(f"  > Created {folder_id}{config['video_extension']} in {iter_duration/60:.2f} minutes.\n", flush=True)
+            tqdm.write(f"  > Created {folder_id}{config['video_extension']} in {iter_duration/60:.2f} minutes.\n")
         else:
-            print(f"  > Created {folder_id}{config['video_extension']} in {iter_duration:.2f} seconds.\n", flush=True)
-        print("    Output file metrics versus expectations:\n", flush=True)
-        print(expectations_table_str, flush=True)
+            tqdm.write(f"  > Created {folder_id}{config['video_extension']} in {iter_duration:.2f} seconds.\n")
+        tqdm.write("    Output file metrics versus expectations:\n")
+        tqdm.write(expectations_table_str)
 
     # Check expectations
     is_bpp_ideal_80 = avg_bpp_src * 0.80 <= actual_bpp <= avg_bpp_src * 1.20
@@ -809,18 +807,57 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
 
     # GCP serial upload
     upload_status = "PENDING"
+    throughput_rate = "Unknown"
+    
     if config.get('gcp_upload') and process:
         try:
             gcloud_exec = shutil.which("gcloud")
-            up_res = subprocess.run([gcloud_exec, "storage", "cp", output_path,
-                                    config['gcp_bucket_path']],
-                                    capture_output=True, text=True)
-            if up_res.returncode == 0:
+            cmd_up = [gcloud_exec, "storage", "cp", output_path, config['gcp_bucket_path']]
+            
+            # Start the process with a pipe for stderr (where gcloud sends status info)
+            process_up = subprocess.Popen(
+                cmd_up,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1,
+                universal_newlines=True
+            )
+
+            # Read the stderr stream line-by-line while the process runs
+            full_output = []
+            while True:
+                line = process_up.stderr.readline()
+                if not line and process_up.poll() is not None:
+                    break
+                if line:
+                    clean_line = line.strip()
+                    full_output.append(clean_line)
+                    # Optional: Uncomment the next line if you want to see raw lines in the log
+                    # log.write(f"[GCP DEBUG] {clean_line}\n")
+
+            # Wait for process to finish and check return code
+            return_code = process_up.wait()
+            
+            if return_code == 0:
                 upload_status = "SUCCESS"
+                
+                # Parse the output for the through-rate (usually on the last or 2nd to last line)
+                # gcloud typically reports: "Average throughput: 85.4MiB/s"
+                for out_line in reversed(full_output):
+                    if "throughput" in out_line.lower():
+                        throughput_rate = out_line.split(":")[-1].strip()
+                        break
+                
+                # Report to console without breaking tqdm bars
+                tqdm.write(f"  > {folder_id} uploaded to GCP at {throughput_rate}")
+                
                 if config.get('delete_local_after_upload'):
                     os.remove(output_path)
             else:
-                upload_status = f"FAILED: {up_res.stderr}"
+                error_details = "".join(full_output)
+                upload_status = f"FAILED: {error_details}"
+                
         except Exception as e:
             upload_status = f"FAILED: {str(e)}"
 
@@ -883,7 +920,7 @@ def process_deployments(config_path: str = 'configurations.yml', process=True):
     # Verify there is enough disk space to continue without locking up system
     os.makedirs(config['output_directory'], exist_ok=True)
     _, _, free = shutil.disk_usage(config['output_directory'])
-    if free // (2**30) < (config['min_gb_required'] * config['num_workers']):
+    if free // (2**30) < config['min_gb_required']:
         log_and_print(f"ERROR: Insufficient disk space ({free // (2**30)}GB remaining). Stopping.", config['log_file'])
         return False
     
