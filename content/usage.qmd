@@ -6,16 +6,16 @@ metadata-files:
 order: 4
 ---
 
-Two tips before getting started:
-
-1. It is recommended to [create a new branch](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/about-branches) for any changes or experiments. This allows you to work without affecting the main branch and helps minimize version conflicts in the future.
-2. Do not modify the `configurations-template.yml` file provided in the repository. Instead, make a copy of this file to preserve the version-controlled template for future use. Newly created configurations will be ignored by Git version control.
-
-There are multiple ways to use this utility depending on your familiarity with Git, R, Python, and/or command line. In order of increasing technical complexity, the options are:
+Once your [configurations are set](configuration.qmd), there are multiple ways to use this utility depending on your familiarity with Git, R, Python, and/or command line. In order of increasing technical complexity, the options are:
 
 ### No command line
 
-The easiest way to launch the utility on Windows is to use the `process_videos.bat` file. You will be prompted to select the configurations YAML file to use, and the script will then run according to the settings specified in that file.
+The easiest way to launch the utility on Windows is to use the `process_videos.bat` file. Simply double-click this file to launch. You will be prompted to select the configurations YAML file to use, and the script will then run according to the settings specified in that file.
+
+
+::: {.callout-tip}
+Do not modify the `configurations-template.yml` file provided in the repository. Instead, make a copy of this file to preserve the version-controlled template for future use. Newly created configurations will be ignored by Git version control.
+:::
 
 Alternatively, the `process_videos_dragndrop.bat` file will open a Windows Command Prompt terminal and prompt you to drag and drop the configurations YAML file into the terminal. Open a File Explorer window, navigate to the desired YAML file, and drag it into the terminal as instructed. The script will then run according to the settings specified in that file.
 
@@ -26,7 +26,7 @@ In either case, status updates, errors or warnings, and instructions will be pri
 For users comfortable using R and RStudio, the `process_videos.R` script can be run directly from RStudio. Open the project in RStudio, set your working directory to the project directory (where the scripts are located), and run the `process_videos.R` script. You will be prompted to select the configurations YAML file to use, and the script will then run according to the settings specified in that file.
 
 ::: {.callout-note title="A note for R users"}
-The `process_videos.R` script is a launcher/wrapper script that runs the Python video processing utility `process_videos.py`. It is pre-configured to use the "Private Library" (Virtual Environment) created during setup. You don't need to manually activate anything; just double-click the Rscript file and provide your configuration file when prompted.
+The `process_videos.R` script is a launcher/wrapper script that runs the Python video processing utility `process_videos.py`. It is pre-configured to use the virtual environment created during setup. You don't need to manually activate anything; just double-click the Rscript file and provide your configuration file when prompted.
 :::
 
 ### Python and command line

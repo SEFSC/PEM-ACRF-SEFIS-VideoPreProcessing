@@ -12,7 +12,7 @@ A `configurations.yml` file is an easy way to control tool behavior as well as k
 2. The directory containing the CSV metadata file and the relevant column headers
 3. The directory where the new stitched video should be saved
 
-These and other configuration options are detailed [in the docs](../index.qmd#options).
+These and other configuration options are detailed [below](#options).
 
 The configuration file is a YAML file structured as `key: value` pairs. The order in which these entries are presented in the file does not matter, but [all keys need to be included and match exactly](../index.qmd#options) as expected unless otherwise noted. For example:
 
@@ -20,9 +20,9 @@ The configuration file is a YAML file structured as `key: value` pairs. The orde
 # ----- PATH SETTINGS -----
 input_directory: "C:\\Users\\user.name\\Documents\\videos"
 output_directory: "C:\\Users\\user.name\\Documents\\videos"
-csv_path: "C:\\Users\\user.name\\Documents\\videos\\SEFIS test vids.csv"
-col_foldername: "foldername"
-col_timebottom: "timebottom"
+csv_path: "C:\\Users\\user.name\\Documents\\videos\\timestamps.csv"
+col_folder_name: "foldername"
+col_start_time: "readstarttime"
 
 # ----- PROCESSING SETTINGS -----
 clear_log: false
@@ -34,10 +34,65 @@ use_gpu: false
 ffmpeg_path: "ffmpeg/bin/ffmpeg.exe"
 ffprobe_path: "ffmpeg/bin/ffprobe.exe"
 ```
-It is recommended to [create a new branch](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/about-branches) for any changes or experiments, including creating and modifying configuration files. This allows you to work without affecting the main branch and minimize version conflicts in the future.
+
+If you [cloned the repository](setup.qmd), it is recommended to [create a new branch](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/about-branches) for any changes or experiments, including creating and modifying configuration files. This allows you to work without affecting the main branch and minimize version conflicts in the future.
 
 ::: {.callout-tip title="A note on reproducibility"}
 For the sake of documenting workflows and facilitating future reproducibility, consider creating new configuration files for each collection of videos processed (for example, one for each parent folder containing multiple deployments). There is no restriction on what this file can be called; you will tell the script which file to use when you [execute the script](usage.qmd#running-the-model). Thus, some convention like `configuration-2025.yml` might be sensible. It is best practice to avoid spaces and special characters other than underscores and hyphens in file names to avoid issues with file paths.
+:::
+
+### Options
+
+Available user option are as follows:
+
+| Key              | Description                                              |
+|:-----------------|:---------------------------------------------------------|
+`input_directory`  | (str) Path to parent folder containing subfolders for set of videos. The subfolders should be named according to the collection number (e.g., `DEPLOYMENT_001`), which will be used to name the new video file, and should contain all of the video files for that deployment.
+`output_directory` | (str) Path to folder where the new video file will be saved. The new video will automatically be named according to the collection number (e.g., `DEPLOYMENT_001.MP4`).
+`csv_path`         | (str) Path (including name) of the "time-on-bottom" CSV metadata file. This file should contain entries for each deployment (subfolder) in rows with collection number in one column and "time-on-bottom" in a separate column. All other columns will be ignored. Note that directory and file names are case-sensitive on some operating systems.
+`col_folder_name`  | (str) Case-sensitive column name for the column containing the deployment or folder name.
+`col_start_time`   | (str) Case-sensitive column name for the column containing the reference timestamps. Expected format of the timestamps is `HH:MM:SS:FF`.
+: Paths and associated settings. These have no defaults and must be included.
+
+<br>
+
+| Key                       | Description                                              |
+|:--------------------------|:---------------------------------------------------------|
+`clear_log`                 | (Boolean) If true, clears the log file at the start of each run. Otherwise, appends to the existing log file. Defaults to false.
+`delete_local_after_upload` | (Boolean) If true, deletes the local copy of the created video after it is successfully uploaded to the Google Cloud bucket. Only applicable if `gcp_upload: true`. Defaults to false.
+`diagnostic_mode`           | (Boolean) If true, prints the video cut times and embeds an authoritative timestamp into the video itself to verify stitching. Defaults to false.
+`gcp_bucket_path`           | (str) Full path to a GCP bucket to push new videos after completion. Requires `gcp_upload: true`.
+`gcp_upload`                | (Boolean) If true, each video will be pushed to the GCP bucket passed to `gcp_bucket_path` after creation. Must be used with `gcp_bucket_path`. Defaults to false.
+`log_file`                  | (str) Path to and name of the log file where processing information will be recorded. Defaults to `./processing-log.txt` (in the present working directory).
+`min_gb_required`           | (int) Minimum required free disk space in GB to start processing. Script will warn if available space is below this threshold. Defaults to 10.
+`num_workers`               | (int) Number of workers to use for parallel processing, which corresponds (roughly) to the number of videos that can be processed simultaneously. The maximum value depends on system hardware, including CPU vs. GPU, and will be automatically adjusted down to the highest possible value (while leaving a buffer to support operating system functionality) if set higher than what is supported. Recommended values: 1 for older standard laptops, 8-12 for high-end laptops, 24-48 for high-performance computing (HPC) systems. Do not set as high as possible if you intend to use the machine for other purposes while the videos are being processed. Defaults to 1 (no parallel processing).
+`output_fps`                | (int, float, or str) Desired frame rate (frames per second) of the output video. Set this to a number if a different frame is desired than that of the input videos, or to "auto" to match the frame rate of the input videos (default).
+`time_buffer_minutes`       | (int) Number of whole minutes between the CSV reference timestamp and the start of the extracted video segment. Can be positive or negative. For example, set to a *positive* value if the timestamp indicates the time the trap hits the bottom or to a *negative* value if the timestamp indicates the video read time. Fractional minutes or `MM:SS` not yet supported. Defaults to -2.
+`quality_crf`               | (int or "auto") Constant Rate Factor (CRF) for video encoding quality. Lower values mean better quality: 18 is high quality, 23 is standard. 10 with `use_gpu: false` or 11 with `use_gpu: true` produced bit rate and file size most similar to those of the original GoPro files during trial and error testing. Often machine (hardware) dependent. If `quality_crf: "auto"`,  the input video bit rate will be used to dynamically calculate a target bitrate for the output video. Defaults to "auto".
+`reprocess`                 | (Boolean) If true, existing stitched videos of the same name will be overwritten. Otherwise, skips folders where the output file already exists. Defaults to false.
+`start_time_fps`            | (int or float) Frame rate at which the video player software read the video when the CSV reference times were determined. Defaults to 30.
+`timeout_minutes`           | (int) Maximum time in whole minutes to try processing a video before giving up. Can be used to prevent hang ups due to bad network connections, but be sure to allow enough time to actually process a video. Fractional minutes or `MM:SS` not yet supported. Defaults to None (no timeout).
+`use_gpu`                   | (Boolean) Whether to use GPU acceleration, if available. Requires GPU hardware and compatible `ffmpeg` build (see [below](#dependencies)). Defaults to false. 
+`video_duration_minutes`    | (int) Expected duration of the final video in whole minutes. Fractional minutes or `MM:SS` not supported. Defaults to 24.
+`video_extension`           | (str) The file extension for the video files to be processed. Defaults to ".MP4".
+: Processing settings that can be adjusted if or as desired. These can be omitted from the configuration file if the default values are acceptable. They will still be recorded in the log file even if omitted from the configuration file.
+
+<br>
+
+| Key              | Description                                              |
+|:-----------------|:---------------------------------------------------------|
+`ffmpeg_path`      | (str) Path to the executable `ffmpeg` utility (see [Getting Started](../index.qmd#dependencies)). Defaults to "ffmpeg/bin/ffmpeg.exe".
+`ffprobe_path`     | (str) Path to the executable `ffprobe` utility (see [Getting Started](../index.qmd#dependencies)). Defaults to "ffmpeg/bin/ffprobe.exe".
+: Video processing utilities. These should not need to be changed once set but may vary between computers and users.
+
+<br>
+
+::: {.callout-tip title="A note on file paths"}
+Use double quotation marks with forward slashes (/) or double backslashes (\\\\) for Windows paths to avoid issues with escape characters and spaces. For example, `"C:/Users/user.name/Documents/configs.yaml"` or `"C:\\Users\\user.name\\Documents\\configs.yaml"`.
+:::
+
+::: {.callout-tip title="A note on naming conventions"}
+It is best practice to avoid spaces and special characters other than underscores and hyphens in directory and file names to avoid issues with file paths. For this project, this applies to video files, the CSV metadata file, configuration files, and relevant directory names.
 :::
 
 ### Where to save your configuration file
