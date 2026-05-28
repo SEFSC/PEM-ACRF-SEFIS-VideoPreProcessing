@@ -2,7 +2,7 @@
 <html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
 
 <meta charset="utf-8">
-<meta name="generator" content="quarto-1.9.37">
+<meta name="generator" content="quarto-1.9.38">
 
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
 
@@ -76,14 +76,14 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <script src="../site_libs/quarto-html/tippy.umd.min.js"></script>
 <script src="../site_libs/quarto-html/anchor.min.js"></script>
 <link href="../site_libs/quarto-html/tippy.css" rel="stylesheet">
-<link href="../site_libs/quarto-html/quarto-syntax-highlighting-7f8f88aac4f3542376d5c11b86a4c14d.css" rel="stylesheet" class="quarto-color-scheme" id="quarto-text-highlighting-styles">
-<link href="../site_libs/quarto-html/quarto-syntax-highlighting-dark-d0ae9245876894da5ac7e18953ecc5cc.css" rel="stylesheet" class="quarto-color-scheme quarto-color-alternate" id="quarto-text-highlighting-styles">
-<link href="../site_libs/quarto-html/quarto-syntax-highlighting-7f8f88aac4f3542376d5c11b86a4c14d.css" rel="stylesheet" class="quarto-color-scheme-extra" id="quarto-text-highlighting-styles">
+<link href="../site_libs/quarto-html/quarto-syntax-highlighting-15634bcf2e68342d4ad2dfa704d543f6.css" rel="stylesheet" class="quarto-color-scheme" id="quarto-text-highlighting-styles">
+<link href="../site_libs/quarto-html/quarto-syntax-highlighting-dark-0a6b7249c26820e032cb0bd839ff02b1.css" rel="stylesheet" class="quarto-color-scheme quarto-color-alternate" id="quarto-text-highlighting-styles">
+<link href="../site_libs/quarto-html/quarto-syntax-highlighting-15634bcf2e68342d4ad2dfa704d543f6.css" rel="stylesheet" class="quarto-color-scheme-extra" id="quarto-text-highlighting-styles">
 <script src="../site_libs/bootstrap/bootstrap.min.js"></script>
 <link href="../site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
-<link href="../site_libs/bootstrap/bootstrap-12c5e11255d1ba86debc14f9a0fb43fb.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme" id="quarto-bootstrap" data-mode="light">
-<link href="../site_libs/bootstrap/bootstrap-dark-7cd8905afccf9e4aff4836e42671a711.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme quarto-color-alternate" id="quarto-bootstrap" data-mode="dark">
-<link href="../site_libs/bootstrap/bootstrap-12c5e11255d1ba86debc14f9a0fb43fb.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme-extra" id="quarto-bootstrap" data-mode="light">
+<link href="../site_libs/bootstrap/bootstrap-a98fd9aef643011de3f2a1bc00e897c6.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme" id="quarto-bootstrap" data-mode="light">
+<link href="../site_libs/bootstrap/bootstrap-dark-b9703d2f19b071d4ee5c651abf4e01ca.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme quarto-color-alternate" id="quarto-bootstrap" data-mode="dark">
+<link href="../site_libs/bootstrap/bootstrap-a98fd9aef643011de3f2a1bc00e897c6.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme-extra" id="quarto-bootstrap" data-mode="light">
 <script id="quarto-search-options" type="application/json">{
   "location": "navbar",
   "copy-button": false,
@@ -490,15 +490,23 @@ window.Quarto = {
 </header>
 
 
-<p>Two tips before getting started:</p>
-<ol type="1">
-<li>It is recommended to <a href="https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/about-branches">create a new branch</a> for any changes or experiments. This allows you to work without affecting the main branch and helps minimize version conflicts in the future.</li>
-<li>Do not modify the <code>configurations-template.yml</code> file provided in the repository. Instead, make a copy of this file to preserve the version-controlled template for future use. Newly created configurations will be ignored by Git version control.</li>
-</ol>
-<p>There are multiple ways to use this utility depending on your familiarity with Git, R, Python, and/or command line. In order of increasing technical complexity, the options are:</p>
+<p>Once your <a href="../content/configuration.html">configurations are set</a>, there are multiple ways to use this utility depending on your familiarity with Git, R, Python, and/or command line. In order of increasing technical complexity, the options are:</p>
 <section id="no-command-line" class="level3">
 <h3 class="anchored" data-anchor-id="no-command-line">No command line</h3>
-<p>The easiest way to launch the utility on Windows is to use the <code>process_videos.bat</code> file. You will be prompted to select the configurations YAML file to use, and the script will then run according to the settings specified in that file.</p>
+<p>The easiest way to launch the utility on Windows is to use the <code>process_videos.bat</code> file. Simply double-click this file to launch. You will be prompted to select the configurations YAML file to use, and the script will then run according to the settings specified in that file.</p>
+<div class="callout callout-style-default callout-tip callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+Tip
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<p>Do not modify the <code>configurations-template.yml</code> file provided in the repository. Instead, make a copy of this file to preserve the version-controlled template for future use. Newly created configurations will be ignored by Git version control.</p>
+</div>
+</div>
 <p>Alternatively, the <code>process_videos_dragndrop.bat</code> file will open a Windows Command Prompt terminal and prompt you to drag and drop the configurations YAML file into the terminal. Open a File Explorer window, navigate to the desired YAML file, and drag it into the terminal as instructed. The script will then run according to the settings specified in that file.</p>
 <p>In either case, status updates, errors or warnings, and instructions will be printed in the terminal window that opens when the file is run, so be sure to check there if you are expecting output of any kind.</p>
 </section>
@@ -515,7 +523,7 @@ window.Quarto = {
 </div>
 </div>
 <div class="callout-body-container callout-body">
-<p>The <code>process_videos.R</code> script is a launcher/wrapper script that runs the Python video processing utility <code>process_videos.py</code>. It is pre-configured to use the “Private Library” (Virtual Environment) created during setup. You don’t need to manually activate anything; just double-click the Rscript file and provide your configuration file when prompted.</p>
+<p>The <code>process_videos.R</code> script is a launcher/wrapper script that runs the Python video processing utility <code>process_videos.py</code>. It is pre-configured to use the virtual environment created during setup. You don’t need to manually activate anything; just double-click the Rscript file and provide your configuration file when prompted.</p>
 </div>
 </div>
 </section>

@@ -2,7 +2,7 @@
 <html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
 
 <meta charset="utf-8">
-<meta name="generator" content="quarto-1.9.37">
+<meta name="generator" content="quarto-1.9.38">
 
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
 
@@ -76,14 +76,14 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <script src="../site_libs/quarto-html/tippy.umd.min.js"></script>
 <script src="../site_libs/quarto-html/anchor.min.js"></script>
 <link href="../site_libs/quarto-html/tippy.css" rel="stylesheet">
-<link href="../site_libs/quarto-html/quarto-syntax-highlighting-7f8f88aac4f3542376d5c11b86a4c14d.css" rel="stylesheet" class="quarto-color-scheme" id="quarto-text-highlighting-styles">
-<link href="../site_libs/quarto-html/quarto-syntax-highlighting-dark-d0ae9245876894da5ac7e18953ecc5cc.css" rel="stylesheet" class="quarto-color-scheme quarto-color-alternate" id="quarto-text-highlighting-styles">
-<link href="../site_libs/quarto-html/quarto-syntax-highlighting-7f8f88aac4f3542376d5c11b86a4c14d.css" rel="stylesheet" class="quarto-color-scheme-extra" id="quarto-text-highlighting-styles">
+<link href="../site_libs/quarto-html/quarto-syntax-highlighting-15634bcf2e68342d4ad2dfa704d543f6.css" rel="stylesheet" class="quarto-color-scheme" id="quarto-text-highlighting-styles">
+<link href="../site_libs/quarto-html/quarto-syntax-highlighting-dark-0a6b7249c26820e032cb0bd839ff02b1.css" rel="stylesheet" class="quarto-color-scheme quarto-color-alternate" id="quarto-text-highlighting-styles">
+<link href="../site_libs/quarto-html/quarto-syntax-highlighting-15634bcf2e68342d4ad2dfa704d543f6.css" rel="stylesheet" class="quarto-color-scheme-extra" id="quarto-text-highlighting-styles">
 <script src="../site_libs/bootstrap/bootstrap.min.js"></script>
 <link href="../site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
-<link href="../site_libs/bootstrap/bootstrap-12c5e11255d1ba86debc14f9a0fb43fb.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme" id="quarto-bootstrap" data-mode="light">
-<link href="../site_libs/bootstrap/bootstrap-dark-7cd8905afccf9e4aff4836e42671a711.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme quarto-color-alternate" id="quarto-bootstrap" data-mode="dark">
-<link href="../site_libs/bootstrap/bootstrap-12c5e11255d1ba86debc14f9a0fb43fb.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme-extra" id="quarto-bootstrap" data-mode="light">
+<link href="../site_libs/bootstrap/bootstrap-a98fd9aef643011de3f2a1bc00e897c6.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme" id="quarto-bootstrap" data-mode="light">
+<link href="../site_libs/bootstrap/bootstrap-dark-b9703d2f19b071d4ee5c651abf4e01ca.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme quarto-color-alternate" id="quarto-bootstrap" data-mode="dark">
+<link href="../site_libs/bootstrap/bootstrap-a98fd9aef643011de3f2a1bc00e897c6.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme-extra" id="quarto-bootstrap" data-mode="light">
 <script id="quarto-search-options" type="application/json">{
   "location": "navbar",
   "copy-button": false,
@@ -430,7 +430,8 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
     <h2 id="toc-title">On this page</h2>
    
   <ul>
-  <li><a href="#where-to-save-your-configuration-file" id="toc-where-to-save-your-configuration-file" class="nav-link active" data-scroll-target="#where-to-save-your-configuration-file">Where to save your configuration file</a></li>
+  <li><a href="#options" id="toc-options" class="nav-link active" data-scroll-target="#options">Options</a></li>
+  <li><a href="#where-to-save-your-configuration-file" id="toc-where-to-save-your-configuration-file" class="nav-link" data-scroll-target="#where-to-save-your-configuration-file">Where to save your configuration file</a></li>
   </ul>
 <div class="toc-actions"><ul><li><a href="https://github.com/SEFSC/PEM-ACRF-SEFIS-VideoPreProcessing/blob/docs/content/configuration.qmd" class="toc-action"><i class="bi bi-github"></i>View source</a></li><li><a href="https://github.com/SEFSC/PEM-ACRF-SEFIS-VideoPreProcessing/issues/new" class="toc-action"><i class="bi empty"></i>Report an issue</a></li></ul></div></nav>
     </div>
@@ -464,7 +465,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <li>The directory containing the CSV metadata file and the relevant column headers</li>
 <li>The directory where the new stitched video should be saved</li>
 </ol>
-<p>These and other configuration options are detailed <a href="../index.html#options">in the docs</a>.</p>
+<p>These and other configuration options are detailed <a href="#options">below</a>.</p>
 <p>The configuration file is a YAML file structured as <code>key: value</code> pairs. The order in which these entries are presented in the file does not matter, but <a href="../index.html#options">all keys need to be included and match exactly</a> as expected unless otherwise noted. For example:</p>
 <div class="code-with-filename">
 <div class="code-with-filename-file">
@@ -473,9 +474,9 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb1" data-filename="configurations.yml"><pre class="sourceCode yaml code-with-copy"><code class="sourceCode yaml"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="co"># ----- PATH SETTINGS -----</span></span>
 <span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="fu">input_directory</span><span class="kw">:</span><span class="at"> </span><span class="st">"C:</span><span class="sc">\\</span><span class="st">Users</span><span class="sc">\\</span><span class="st">user.name</span><span class="sc">\\</span><span class="st">Documents</span><span class="sc">\\</span><span class="st">videos"</span></span>
 <span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="fu">output_directory</span><span class="kw">:</span><span class="at"> </span><span class="st">"C:</span><span class="sc">\\</span><span class="st">Users</span><span class="sc">\\</span><span class="st">user.name</span><span class="sc">\\</span><span class="st">Documents</span><span class="sc">\\</span><span class="st">videos"</span></span>
-<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a><span class="fu">csv_path</span><span class="kw">:</span><span class="at"> </span><span class="st">"C:</span><span class="sc">\\</span><span class="st">Users</span><span class="sc">\\</span><span class="st">user.name</span><span class="sc">\\</span><span class="st">Documents</span><span class="sc">\\</span><span class="st">videos</span><span class="sc">\\</span><span class="st">SEFIS test vids.csv"</span></span>
-<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a><span class="fu">col_foldername</span><span class="kw">:</span><span class="at"> </span><span class="st">"foldername"</span></span>
-<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a><span class="fu">col_timebottom</span><span class="kw">:</span><span class="at"> </span><span class="st">"timebottom"</span></span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a><span class="fu">csv_path</span><span class="kw">:</span><span class="at"> </span><span class="st">"C:</span><span class="sc">\\</span><span class="st">Users</span><span class="sc">\\</span><span class="st">user.name</span><span class="sc">\\</span><span class="st">Documents</span><span class="sc">\\</span><span class="st">videos</span><span class="sc">\\</span><span class="st">timestamps.csv"</span></span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a><span class="fu">col_folder_name</span><span class="kw">:</span><span class="at"> </span><span class="st">"foldername"</span></span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a><span class="fu">col_start_time</span><span class="kw">:</span><span class="at"> </span><span class="st">"readstarttime"</span></span>
 <span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a><span class="co"># ----- PROCESSING SETTINGS -----</span></span>
 <span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a><span class="fu">clear_log</span><span class="kw">:</span><span class="at"> </span><span class="ch">false</span></span>
@@ -487,7 +488,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <span id="cb1-15"><a href="#cb1-15" aria-hidden="true" tabindex="-1"></a><span class="fu">ffmpeg_path</span><span class="kw">:</span><span class="at"> </span><span class="st">"ffmpeg/bin/ffmpeg.exe"</span></span>
 <span id="cb1-16"><a href="#cb1-16" aria-hidden="true" tabindex="-1"></a><span class="fu">ffprobe_path</span><span class="kw">:</span><span class="at"> </span><span class="st">"ffmpeg/bin/ffprobe.exe"</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </div>
-<p>It is recommended to <a href="https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/about-branches">create a new branch</a> for any changes or experiments, including creating and modifying configuration files. This allows you to work without affecting the main branch and minimize version conflicts in the future.</p>
+<p>If you <a href="../content/setup.html">cloned the repository</a>, it is recommended to <a href="https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/about-branches">create a new branch</a> for any changes or experiments, including creating and modifying configuration files. This allows you to work without affecting the main branch and minimize version conflicts in the future.</p>
 <div class="callout callout-style-default callout-tip callout-titled" title="A note on reproducibility">
 <div class="callout-header d-flex align-content-center">
 <div class="callout-icon-container">
@@ -501,6 +502,172 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <p>For the sake of documenting workflows and facilitating future reproducibility, consider creating new configuration files for each collection of videos processed (for example, one for each parent folder containing multiple deployments). There is no restriction on what this file can be called; you will tell the script which file to use when you <a href="../content/usage.html#running-the-model">execute the script</a>. Thus, some convention like <code>configuration-2025.yml</code> might be sensible. It is best practice to avoid spaces and special characters other than underscores and hyphens in file names to avoid issues with file paths.</p>
 </div>
 </div>
+<section id="options" class="level3">
+<h3 class="anchored" data-anchor-id="options">Options</h3>
+<p>Available user option are as follows:</p>
+<table class="caption-top table">
+<caption>Paths and associated settings. These have no defaults and must be included.</caption>
+<colgroup>
+<col style="width: 23%">
+<col style="width: 76%">
+</colgroup>
+<thead>
+<tr class="header">
+<th style="text-align: left;">Key</th>
+<th style="text-align: left;">Description</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: left;"><code>input_directory</code></td>
+<td style="text-align: left;">(str) Path to parent folder containing subfolders for set of videos. The subfolders should be named according to the collection number (e.g., <code>DEPLOYMENT_001</code>), which will be used to name the new video file, and should contain all of the video files for that deployment.</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;"><code>output_directory</code></td>
+<td style="text-align: left;">(str) Path to folder where the new video file will be saved. The new video will automatically be named according to the collection number (e.g., <code>DEPLOYMENT_001.MP4</code>).</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;"><code>csv_path</code></td>
+<td style="text-align: left;">(str) Path (including name) of the “time-on-bottom” CSV metadata file. This file should contain entries for each deployment (subfolder) in rows with collection number in one column and “time-on-bottom” in a separate column. All other columns will be ignored. Note that directory and file names are case-sensitive on some operating systems.</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;"><code>col_folder_name</code></td>
+<td style="text-align: left;">(str) Case-sensitive column name for the column containing the deployment or folder name.</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;"><code>col_start_time</code></td>
+<td style="text-align: left;">(str) Case-sensitive column name for the column containing the reference timestamps. Expected format of the timestamps is <code>HH:MM:SS:FF</code>.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<table class="caption-top table">
+<caption>Processing settings that can be adjusted if or as desired. These can be omitted from the configuration file if the default values are acceptable. They will still be recorded in the log file even if omitted from the configuration file.</caption>
+<thead>
+<tr class="header">
+<th style="text-align: left;">Key</th>
+<th style="text-align: left;">Description</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: left;"><code>clear_log</code></td>
+<td style="text-align: left;">(Boolean) If true, clears the log file at the start of each run. Otherwise, appends to the existing log file. Defaults to false.</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;"><code>delete_local_after_upload</code></td>
+<td style="text-align: left;">(Boolean) If true, deletes the local copy of the created video after it is successfully uploaded to the Google Cloud bucket. Only applicable if <code>gcp_upload: true</code>. Defaults to false.</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;"><code>diagnostic_mode</code></td>
+<td style="text-align: left;">(Boolean) If true, prints the video cut times and embeds an authoritative timestamp into the video itself to verify stitching. Defaults to false.</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;"><code>gcp_bucket_path</code></td>
+<td style="text-align: left;">(str) Full path to a GCP bucket to push new videos after completion. Requires <code>gcp_upload: true</code>.</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;"><code>gcp_upload</code></td>
+<td style="text-align: left;">(Boolean) If true, each video will be pushed to the GCP bucket passed to <code>gcp_bucket_path</code> after creation. Must be used with <code>gcp_bucket_path</code>. Defaults to false.</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;"><code>log_file</code></td>
+<td style="text-align: left;">(str) Path to and name of the log file where processing information will be recorded. Defaults to <code>./processing-log.txt</code> (in the present working directory).</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;"><code>min_gb_required</code></td>
+<td style="text-align: left;">(int) Minimum required free disk space in GB to start processing. Script will warn if available space is below this threshold. Defaults to 10.</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;"><code>num_workers</code></td>
+<td style="text-align: left;">(int) Number of workers to use for parallel processing, which corresponds (roughly) to the number of videos that can be processed simultaneously. The maximum value depends on system hardware, including CPU vs.&nbsp;GPU, and will be automatically adjusted down to the highest possible value (while leaving a buffer to support operating system functionality) if set higher than what is supported. Recommended values: 1 for older standard laptops, 8-12 for high-end laptops, 24-48 for high-performance computing (HPC) systems. Do not set as high as possible if you intend to use the machine for other purposes while the videos are being processed. Defaults to 1 (no parallel processing).</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;"><code>output_fps</code></td>
+<td style="text-align: left;">(int, float, or str) Desired frame rate (frames per second) of the output video. Set this to a number if a different frame is desired than that of the input videos, or to “auto” to match the frame rate of the input videos (default).</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;"><code>time_buffer_minutes</code></td>
+<td style="text-align: left;">(int) Number of whole minutes between the CSV reference timestamp and the start of the extracted video segment. Can be positive or negative. For example, set to a <em>positive</em> value if the timestamp indicates the time the trap hits the bottom or to a <em>negative</em> value if the timestamp indicates the video read time. Fractional minutes or <code>MM:SS</code> not yet supported. Defaults to -2.</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;"><code>quality_crf</code></td>
+<td style="text-align: left;">(int or “auto”) Constant Rate Factor (CRF) for video encoding quality. Lower values mean better quality: 18 is high quality, 23 is standard. 10 with <code>use_gpu: false</code> or 11 with <code>use_gpu: true</code> produced bit rate and file size most similar to those of the original GoPro files during trial and error testing. Often machine (hardware) dependent. If <code>quality_crf: "auto"</code>, the input video bit rate will be used to dynamically calculate a target bitrate for the output video. Defaults to “auto”.</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;"><code>reprocess</code></td>
+<td style="text-align: left;">(Boolean) If true, existing stitched videos of the same name will be overwritten. Otherwise, skips folders where the output file already exists. Defaults to false.</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;"><code>start_time_fps</code></td>
+<td style="text-align: left;">(int or float) Frame rate at which the video player software read the video when the CSV reference times were determined. Defaults to 30.</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;"><code>timeout_minutes</code></td>
+<td style="text-align: left;">(int) Maximum time in whole minutes to try processing a video before giving up. Can be used to prevent hang ups due to bad network connections, but be sure to allow enough time to actually process a video. Fractional minutes or <code>MM:SS</code> not yet supported. Defaults to None (no timeout).</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;"><code>use_gpu</code></td>
+<td style="text-align: left;">(Boolean) Whether to use GPU acceleration, if available. Requires GPU hardware and compatible <code>ffmpeg</code> build (see <a href="#dependencies">below</a>). Defaults to false.</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;"><code>video_duration_minutes</code></td>
+<td style="text-align: left;">(int) Expected duration of the final video in whole minutes. Fractional minutes or <code>MM:SS</code> not supported. Defaults to 24.</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;"><code>video_extension</code></td>
+<td style="text-align: left;">(str) The file extension for the video files to be processed. Defaults to “.MP4”.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<table class="caption-top table">
+<caption>Video processing utilities. These should not need to be changed once set but may vary between computers and users.</caption>
+<thead>
+<tr class="header">
+<th style="text-align: left;">Key</th>
+<th style="text-align: left;">Description</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: left;"><code>ffmpeg_path</code></td>
+<td style="text-align: left;">(str) Path to the executable <code>ffmpeg</code> utility (see <a href="../index.html#dependencies">Getting Started</a>). Defaults to “ffmpeg/bin/ffmpeg.exe”.</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;"><code>ffprobe_path</code></td>
+<td style="text-align: left;">(str) Path to the executable <code>ffprobe</code> utility (see <a href="../index.html#dependencies">Getting Started</a>). Defaults to “ffmpeg/bin/ffprobe.exe”.</td>
+</tr>
+</tbody>
+</table>
+<p><br></p>
+<div class="callout callout-style-default callout-tip callout-titled" title="A note on file paths">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Tip</span>A note on file paths
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<p>Use double quotation marks with forward slashes (/) or double backslashes (\\) for Windows paths to avoid issues with escape characters and spaces. For example, <code>"C:/Users/user.name/Documents/configs.yaml"</code> or <code>"C:\\Users\\user.name\\Documents\\configs.yaml"</code>.</p>
+</div>
+</div>
+<div class="callout callout-style-default callout-tip callout-titled" title="A note on naming conventions">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Tip</span>A note on naming conventions
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<p>It is best practice to avoid spaces and special characters other than underscores and hyphens in directory and file names to avoid issues with file paths. For this project, this applies to video files, the CSV metadata file, configuration files, and relevant directory names.</p>
+</div>
+</div>
+</section>
 <section id="where-to-save-your-configuration-file" class="level3">
 <h3 class="anchored" data-anchor-id="where-to-save-your-configuration-file">Where to save your configuration file</h3>
 <p>There are two schools of thought when it comes to organizing configuration files. It is ultimately up to the user to choose whichever convention is best for them.</p>
