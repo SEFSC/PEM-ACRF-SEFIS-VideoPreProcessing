@@ -7,7 +7,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
 
 
-<title>Mounting a Drive – SEFIS Video Pre-Processing (clip-and-stitch)</title>
+<title>Worfkow – SEFIS Video Pre-Processing (clip-and-stitch)</title>
 <style>
 /* Default styles provided by pandoc.
 ** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
@@ -32,8 +32,8 @@ ul.task-list li input[type="checkbox"] {
 <script src="../site_libs/quarto-search/fuse.min.js"></script>
 <script src="../site_libs/quarto-search/quarto-search.js"></script>
 <meta name="quarto:offset" content="../">
-<link href="../content/configuration.html" rel="next">
-<link href="../content/setup.html" rel="prev">
+<link href="../content/Appendices/gemini.html" rel="next">
+<link href="../content/usage.html" rel="prev">
 <link href="../theme/images/favicon.png" rel="icon" type="image/png">
 <script src="../site_libs/quarto-html/quarto.js" type="module"></script>
 <script src="../site_libs/quarto-html/tabsets/tabsets.js" type="module"></script>
@@ -302,7 +302,7 @@ ul.task-list li input[type="checkbox"] {
       <button type="button" class="quarto-btn-toggle btn" data-bs-toggle="collapse" role="button" data-bs-target=".quarto-sidebar-collapse-item" aria-controls="quarto-sidebar" aria-expanded="false" aria-label="Toggle sidebar navigation" onclick="if (window.quartoToggleHeadroom) { window.quartoToggleHeadroom(); }">
         <i class="bi bi-layout-text-sidebar-reverse"></i>
       </button>
-        <nav class="quarto-page-breadcrumbs" aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="../content/setup.html">Content</a></li><li class="breadcrumb-item"><a href="../content/mount.html">Mounting a Drive</a></li></ol></nav>
+        <nav class="quarto-page-breadcrumbs" aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="../content/setup.html">Content</a></li><li class="breadcrumb-item"><a href="../content/workflow.html">Worfkow</a></li></ol></nav>
         <a class="flex-grow-1" role="navigation" data-bs-toggle="collapse" data-bs-target=".quarto-sidebar-collapse-item" aria-controls="quarto-sidebar" aria-expanded="false" aria-label="Toggle sidebar navigation" onclick="if (window.quartoToggleHeadroom) { window.quartoToggleHeadroom(); }">      
         </a>
       <button type="button" class="btn quarto-search-button" aria-label="Search" onclick="window.quartoOpenSearch();">
@@ -350,7 +350,7 @@ ul.task-list li input[type="checkbox"] {
 </li>
           <li class="sidebar-item">
   <div class="sidebar-item-container"> 
-  <a href="../content/mount.html" class="sidebar-item-text sidebar-link active">
+  <a href="../content/mount.html" class="sidebar-item-text sidebar-link">
  <span class="menu-text">Mounting a Drive</span></a>
   </div>
 </li>
@@ -368,7 +368,7 @@ ul.task-list li input[type="checkbox"] {
 </li>
           <li class="sidebar-item">
   <div class="sidebar-item-container"> 
-  <a href="../content/workflow.html" class="sidebar-item-text sidebar-link">
+  <a href="../content/workflow.html" class="sidebar-item-text sidebar-link active">
  <span class="menu-text">Worfkow</span></a>
   </div>
 </li>
@@ -396,17 +396,24 @@ ul.task-list li input[type="checkbox"] {
 </nav>
 <div id="quarto-sidebar-glass" class="quarto-sidebar-collapse-item" data-bs-toggle="collapse" data-bs-target=".quarto-sidebar-collapse-item"></div>
 <!-- margin-sidebar -->
-    <div id="quarto-margin-sidebar" class="sidebar margin-sidebar zindex-bottom">
-        
+    <div id="quarto-margin-sidebar" class="sidebar margin-sidebar">
+        <nav id="TOC" role="doc-toc" class="toc-active">
+    <h2 id="toc-title">On this page</h2>
+   
+  <ul>
+  <li><a href="#sefis-survey" id="toc-sefis-survey" class="nav-link active" data-scroll-target="#sefis-survey">SEFIS Survey</a></li>
+  <li><a href="#script-workflow" id="toc-script-workflow" class="nav-link" data-scroll-target="#script-workflow">Script workflow</a></li>
+  </ul>
+<div class="toc-actions"><ul><li><a href="https://github.com/SEFSC/PEM-ACRF-SEFIS-VideoPreProcessing/blob/docs/content/workflow.qmd" class="toc-action"><i class="bi bi-github"></i>View source</a></li><li><a href="https://github.com/SEFSC/PEM-ACRF-SEFIS-VideoPreProcessing/issues/new" class="toc-action"><i class="bi empty"></i>Report an issue</a></li></ul></div></nav>
     </div>
 <!-- main -->
 <main class="content" id="quarto-document-content">
 
 
-<header id="title-block-header" class="quarto-title-block default"><nav class="quarto-page-breadcrumbs quarto-title-breadcrumbs d-none d-lg-block" aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="../content/setup.html">Content</a></li><li class="breadcrumb-item"><a href="../content/mount.html">Mounting a Drive</a></li></ol></nav>
+<header id="title-block-header" class="quarto-title-block default"><nav class="quarto-page-breadcrumbs quarto-title-breadcrumbs d-none d-lg-block" aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="../content/setup.html">Content</a></li><li class="breadcrumb-item"><a href="../content/workflow.html">Worfkow</a></li></ol></nav>
 <div class="quarto-title">
-<h1 class="title">Mounting a Drive</h1>
-<p class="subtitle lead">Accessing data stored on a remote drive</p>
+<h1 class="title">Worfkow</h1>
+<p class="subtitle lead">What this tool does and how</p>
 </div>
 
 
@@ -423,26 +430,78 @@ ul.task-list li input[type="checkbox"] {
 </header>
 
 
-<p>If the data to be processed are stored on a remote drive somewhere, such as in Google Shared Drive, that drive must first be “mounted” in order for it to be accessible via the operating system’s file system. The Google Drive application makes accessing personal Google drives and Google shared drives easy. One must, however, log in to authenticate access.</p>
-<p>Simply double click the Google Drive icon on the desktop and log in as normal. When asked to authenticate with two factor authentication, plug your Yubikey into your local computer and authenticate as usual. If you are working on a remote machine, the authentication will be passed to the remote machine. Once done, your Google drive will appear in File Explorer in the menu on the left.</p>
-<div class="callout callout-style-default callout-note callout-titled">
-<div class="callout-header d-flex align-content-center">
-<div class="callout-icon-container">
-<i class="callout-icon"></i>
-</div>
-<div class="callout-title-container flex-fill">
-Note
-</div>
-</div>
-<div class="callout-body-container callout-body">
-<p>Windows wil automatically assign the next available drive letter to Google Drive when mounted. This may be <code>D</code> or <code>G</code> or something else. Note this letter, as you will need it later if you need to access anything in Google Drive.</p>
-</div>
-</div>
-<p>Other drives, such as each lab’s on-prem shared storage drives, are already mapped and are also accessible by their corresponding drive letters.</p>
+<section id="sefis-survey" class="level3">
+<h3 class="anchored" data-anchor-id="sefis-survey">SEFIS Survey</h3>
+<p>SEFIS video surveys are conducted by deploying GoPro cameras onto fish traps at various locations offshore of the southeastern United States. Cameras record continuously for about an hour at a time, and the resulting video files are automatically split into 4GB chunks by GoPro to prevent data loss (hereafter, <em>chapters</em>.) Each chapter contains approximately 15 minutes of footage. While an hour of video is collected, only a single 20-minute window is currently analyzed by scientists. This window is relative to the time the trap hits the bottom, may start or stop at any time within any of the video chapters, and always spans at least two chapters. This utility finds and extracts the desired video window from the original chapters and writes it to a new video file.</p>
+</section>
+<section id="script-workflow" class="level3">
+<h3 class="anchored" data-anchor-id="script-workflow">Script workflow</h3>
+<section id="timestamps" class="level4">
+<h4 class="anchored" data-anchor-id="timestamps">Timestamps</h4>
+<p>There are three timestamps of interest in this workflow:</p>
+<ol type="1">
+<li>The <strong>time on bottom</strong> refers to the <em>video time</em> the camera hits the bottom. This is relative to the time recording starts, which always happens while the camera is still aboard the ship. It is the primary point of reference for the video extraction.</li>
+<li>The <strong>read start time</strong> is the start of the 20-minute video processed (“read”) by scientists. Current protocol is for this to be 10 minutes after the time on bottom, rounded up to the nearest 30 seconds.</li>
+<li>The <strong>video start time</strong> is the start time of the extracted video itself. Current convention is for the video to start <em>two minutes</em> prior to – and extend two minutes beyond – the 20-minute minute processing window. Thus, the extracted video starts <strong>8 minutes</strong> after the time on bottom (rounded up to the nearest 30 seconds) and ends exactly 24 minutes later.</li>
+</ol>
+<p>The user can provide either the time on bottom or the read start time in the CSV file. The script will calculate the video start time using the <code>time_buffer_minutes</code> key. <strong>In order for this to work properly, be sure to set this correctly:</strong></p>
+<ul>
+<li>If the CSV contains the <strong>time on bottom</strong>, <code>time_buffer_minutes</code> should be <em>positive</em> so that the extracted video starts <em>after</em> the camera reaches the bottom. In this case, <code>time_buffer_minutes: 8</code> will satisfy the current protocol of starting the video 8 minutes after reaching the bottom.</li>
+<li>If the CSV contains the <strong>read start time</strong>, <code>time_buffer_minutes</code> should be <em>negative</em> if the extracted video is to start <em>before</em> the 20-minute read window (<code>time_buffer_minutes: -2</code> will satisfy current protocol). Alternatively, this could be set to 0 if no buffer is desired. In this case, <code>video_duration_minutes</code> should be set to 20, unless a different time window is desired.</li>
+</ul>
+</section>
+<section id="frame-rates" class="level4">
+<h4 class="anchored" data-anchor-id="frame-rates">Frame Rates</h4>
+<p>GoPro videos are recorded at approximately 29.97 frames per second (FPS)<a href="#fn1" class="footnote-ref" id="fnref1" role="doc-noteref"><sup>1</sup></a>, but most video software, such as <a href="https://www.videolan.org/">VLC</a> and Windows Media Player, play videos at 30 FPS. This is also true of <a href="https://www.cyberlink.com/products/powerdirector-video-editing-software/overview_en_US.html">Power Director</a>, the video software currently used by the SEFIS team to read the survey videos. This results in a <em>frame rate mismatch</em> between the video time reported in the video software (<em>i.e.</em>, the timeline used to navigate through the video) and the amount of data actually contained in the GoPro video files. This requires scaling to achieve frame-level precision when clipping the original videos:</p>
+<ul>
+<li>The CSV timestamp, regardless of what it corresponds to, is usually determined by viewing the video in Power Director (PD), so its value assumes a frame rate of 30 FPS. One must therefore calculate which frame in the actual 29.97 FPS video corresponds to the frame displayed by PD at the given timestamp.</li>
+<li>Similarly, time durations (both video duration and buffer times) have been determined using PD time at 30 FPS. To achieve these desired time durations, one must calculate how much actual video is needed to achieve those requirements.</li>
+<li>Similar scaling is needed to properly display the burned-in clock in diagnostic mode.</li>
+</ul>
+<p>The script handles all of this scaling by comparing <code>start_time_fps</code>, which specifies the frame rate at which the CSV start time was determined, to the actual frame rate of the original video extracted from the file metadata. Pulling the actual frame rate directly from the original video’s metadata makes the script agnostic to camera brand used, and allowing the user to specify the frame rate used to determine the start time means any software (or any frame rate settings within particular software) can be used. <strong>It is, however, up to the user to correctly specify this frame rate, if it differs from the 30 FPS default.</strong> In addition, the user can opt for any frame rate for the output video as well; similar scaling will happen automatically. By default, the script produces a video with the same frame rate as the original videos being stitched together.</p>
+</section>
+<section id="resolution" class="level4">
+<h4 class="anchored" data-anchor-id="resolution">Resolution</h4>
+<p>Clipping and stitching together video requires video encoding, the process of converting raw, uncompressed video into a compressed, digital format. How this is done depends on both the hardware (<em>e.g.</em>, CPU versus GPU, type of CPU or GPU) and software (<em>e.g.</em>, propriety software, <a href="https://ffmpeg.org/">FFmpeg</a>) used. CPUs, for example, are generally highly efficient at keeping file sizes small while achieving a desired video quality, whereas GPUs often prioritize processing speed and may sacrifice file size to achieve the same video quality.</p>
+<p>While there is no way around getting different results on different machines, the variations can be minimized. This script, by default, does two things to combat this while preserving <em>visual video quality</em> to support scientific analysis:</p>
+<ol type="1">
+<li>Extracts the bitrate, the amount of digital data per unit time, from the metadata of the original video and combines that with the desired output video duration to calculate a <strong>target file size</strong> for the new video</li>
+<li>Calculates a <strong>target bitrate</strong> based on the target file size and the required temporal duration of the new video</li>
+</ol>
+<p>These target values are used to constrain the encoding tool which helps prevent video quality degradation by retaining, to the extent possible, the same amount of information per pixel, or information density, as the original videos.</p>
+<p>This default behavior can be overwritten by setting the <code>quality_crf</code> in configuration file. This uses a Constant Rate Factor (CFR) to control video encoding instead. Lower values mean better quality: 18 is high quality, 23 is standard.</p>
+<p>Regardless of the method used, summary statistics, including target versus actual file size, bitrate, and information density, are included in the log file for each video produced. The script checks whether or not the information density of the output video is within 80% and 90% of the information density of the original video and displays a warning if not. Generally, however, “auto” mode will not trigger this warning.</p>
+</section>
+<section id="parallel-processing" class="level4">
+<h4 class="anchored" data-anchor-id="parallel-processing">Parallel processing</h4>
+<p>The script natively supports parallel processing. If multiple deployments are to be processed, the machine hardware supports parallel processing, and <code>num_workers</code> is greater than 1, the workload will be distributed automatically across the available worker nodes to maximize computation resources and minimize data processing time. The script will ensure that the number passed does not exceed available resources on the machine. Rather than crash, it will automatically scale down the number of workers if needed.</p>
+</section>
+<section id="upload-to-cloud-bucket" class="level4">
+<h4 class="anchored" data-anchor-id="upload-to-cloud-bucket">Upload to cloud bucket</h4>
+<p>New videos can optionally be uploaded to a Google Cloud Project (GCP) storage bucket after creation. <a href="../content/configuration.html">See the docs</a> for how to configure this. When activated, files are uploaded one at a time as they are created. This avoids having to do a bulk file upload afterwards and maximizes computational resources by allowing the machine’s network card to work on file upload while its CPUs/GPUs continue processing other videos.</p>
+<p>By default, new video files are also saved locally, but this can be suppressed to avoid filling up local storage.</p>
+</section>
+<section id="other-behaviors" class="level4">
+<h4 class="anchored" data-anchor-id="other-behaviors">Other behaviors</h4>
+<p>The script contains some built-in checks to ensure robustness:</p>
+<ul>
+<li>Because video files can be quite large, the script verifies that there is enough disk space available in order to process the video without locking up the system. This can be set by the user (<code>min_gb_required</code>) but defaults to 10 GB.</li>
+<li>If the user chooses to upload the videos to a cloud bucket after creation, the script first confirms authentication to the specified bucket and will halt before processing any video if the check fails.</li>
+<li>Any videos that do not contain metadata in the CSV file are skipped and recorded in the log file. Similarly, if a timestamp is included in the CSV file but the corresponding video is not found, the video file will be noted in the log file. Neither scenario will crash the script.</li>
+<li>A log file is created to store all configuration settings for a given processing run as well as summary statistics of the output videos and any warnings or errors that may not trigger a full crash. If unexpected behavior is encountered, check the log file. This file can either be appended to or rewritten. <a href="../content/configuration.html">See the docs</a> for details.</li>
+</ul>
 
 
+</section>
+</section>
 
-</main> <!-- /main -->
+
+<div id="quarto-appendix" class="default"><section id="footnotes" class="footnotes footnotes-end-of-document" role="doc-endnotes"><h2 class="anchored quarto-appendix-heading">Footnotes</h2>
+
+<ol>
+<li id="fn1"><p>They actually record at 30000/1001 = 29.9700299700… FPS, the National Television System Committee broadcast standard. While black and white televisions adhered to a clean 30 FPS standard, color video was slowed slightly to 29.97 to prevent the signal from interfering with the audio.<a href="#fnref1" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+</ol>
+</section></div></main> <!-- /main -->
 <script id="quarto-html-after-body" type="application/javascript">
   window.document.addEventListener("DOMContentLoaded", function (event) {
     // Ensure there is a toggle, if there isn't float one in the top right
@@ -858,13 +917,13 @@ Note
   </script>
 <nav class="page-navigation">
   <div class="nav-page nav-page-previous">
-      <a href="../content/setup.html" class="pagination-link" aria-label="Getting Started">
-        <i class="bi bi-arrow-left-short"></i> <span class="nav-page-text">Getting Started</span>
+      <a href="../content/usage.html" class="pagination-link" aria-label="Usage">
+        <i class="bi bi-arrow-left-short"></i> <span class="nav-page-text">Usage</span>
       </a>          
   </div>
   <div class="nav-page nav-page-next">
-      <a href="../content/configuration.html" class="pagination-link" aria-label="Configuration Settings">
-        <span class="nav-page-text">Configuration Settings</span> <i class="bi bi-arrow-right-short"></i>
+      <a href="../content/Appendices/gemini.html" class="pagination-link" aria-label="Appendix A: Gemini Workflow Planning">
+        <span class="nav-page-text">Appendix A: Gemini Workflow Planning</span> <i class="bi bi-arrow-right-short"></i>
       </a>
   </div>
 </nav>
@@ -876,7 +935,7 @@ Note
 </div>   
     <div class="nav-footer-center">
       &nbsp;
-    <div class="toc-actions"><ul><li><a href="https://github.com/SEFSC/PEM-ACRF-SEFIS-VideoPreProcessing/blob/docs/content/mount.qmd" class="toc-action"><i class="bi bi-github"></i>View source</a></li><li><a href="https://github.com/SEFSC/PEM-ACRF-SEFIS-VideoPreProcessing/issues/new" class="toc-action"><i class="bi empty"></i>Report an issue</a></li></ul></div></div>
+    <div class="toc-actions d-sm-block d-md-none"><ul><li><a href="https://github.com/SEFSC/PEM-ACRF-SEFIS-VideoPreProcessing/blob/docs/content/workflow.qmd" class="toc-action"><i class="bi bi-github"></i>View source</a></li><li><a href="https://github.com/SEFSC/PEM-ACRF-SEFIS-VideoPreProcessing/issues/new" class="toc-action"><i class="bi empty"></i>Report an issue</a></li></ul></div></div>
     <div class="nav-footer-right">
 <p><a href="https://noaa.gov">NOAA</a> <br> <a href="https//fisheries.noaa.gov">NOAA Fisheries</a> <br> <a href="https://www.fisheries.noaa.gov/contact/southeast-fisheries-science-center">Southeast Fisheries Science Center</a></p>
 <p>This page is built with <a href="https://quarto.org/">Quarto</a>. © CC-1.0</p>
