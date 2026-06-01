@@ -40,6 +40,7 @@ Note:    Gemini Coding Partner was used to assist with developing this code.
 # PACKAGE DEPENDENCIES
 # =============================================================================
 
+from collections import defaultdict
 from datetime import datetime
 from typing import Literal
 import pandas as pd
@@ -89,9 +90,9 @@ def validate_config(config: dict):
         'clear_log', 'col_folder_name', 'col_start_time', 'csv_path',
         'delete_local_after_upload', 'diagnostic_mode', 'ffmpeg_path',
         'ffprobe_path', 'gcp_bucket_path', 'gcp_upload', 'input_directory',
-        'log_file', 'min_gb_required', 'num_workers', 'output_directory',
-        'output_fps', 'time_buffer_minutes', 'quality_crf', 'reprocess', 
-        'start_time_fps', 'timeout_minutes', 'use_gpu',
+        'log_file', 'max_retries', 'min_gb_required', 'num_workers',
+        'output_directory', 'output_fps', 'time_buffer_minutes', 'quality_crf',
+        'reprocess', 'start_time_fps', 'timeout_minutes', 'use_gpu',
         'video_duration_minutes', 'video_extension'
     }
     
@@ -410,7 +411,7 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     if not os.path.exists(folder_path):
         with open(config['log_file'], "a") as log:
             log.write(f"SKIP: Folder {folder_path} not found.\n")
-        return {"status": "SKIP", "folder_id": folder_id}
+        return {"status": "SKIP", "folder_id": folder_id, "reason": "Folder path not found"}
     output_path = os.path.join(
         config['output_directory'], f"{folder_id}{config['video_extension']}"
         )
@@ -419,14 +420,14 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     if not config['reprocess'] and os.path.exists(output_path):
         with open(config['log_file'], "a") as log:
             log.write(f"{os.path.basename(output_path)} exists and reprocess is set to False. Nothing to process. Skipping.\n")
-        return {"status": "SKIP", "folder_id": folder_id}
+        return {"status": "SKIP", "folder_id": folder_id, "reason": "Output video already exists"}
 
     # Skip and log any folder listed in the CSV that doesn't exist in the input
     # directory
     if not os.path.exists(folder_path):
         with open(config['log_file'], "a") as log:
             log.write(f"SKIP: Folder {folder_id} not found.\n")
-        return {"status": "SKIP", "folder_id": folder_id}
+        return {"status": "SKIP", "folder_id": folder_id, "reason": "Folder path not found"}
 
     # 3. GATHER & SORT FILES
     video_files = [f for f in os.listdir(folder_path) 
@@ -434,7 +435,7 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     if not video_files:
         with open(config['log_file'], "a") as log:
             log.write(f"SKIP: No videos in {folder_id}.\n")
-        return {"status": "SKIP", "folder_id": folder_id}
+        return {"status": "SKIP", "folder_id": folder_id, "reason": "No matched video extension files inside directory"}
     video_files.sort(key=get_gopro_sort_key)
 
     # 4. CALCULATE TIMELINE
@@ -465,7 +466,7 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
 
     # Extract video metadata
     if config['diagnostic_mode']:
-        tqdm.write(f"\n  > Probing metadata for {len(video_files)} video chapters in {folder_id}...")
+        tqdm.write(f"  > Probing metadata for {len(video_files)} video chapters in {folder_id}...")
     file_data = []
     for f in video_files:
         full_p = os.path.join(folder_path, f)
@@ -515,7 +516,7 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     if not needed_files:
         with open(config['log_file'], "a") as log:
             log.write(f"SKIP: {folder_id} - No footage found for the requested time window.\n")
-        return {"status": "SKIP", "folder_id": folder_id}
+        return {"status": "SKIP", "folder_id": folder_id, "reason": "No overlapping footage found within clipping window"}
 
     # 5. CLIP AND STITCH
     # See https://ffmpeg.org/ffmpeg.html
@@ -645,37 +646,22 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     table_lines.append(f"{'='*80}\n")
     full_table_str = "\n".join(table_lines)
 
+    # Re-check free space before starting this worker's encode
+    _, _, worker_free = shutil.disk_usage(config['output_directory'])
+    if (worker_free // (2**30)) < config['min_gb_required'] and process:
+        with open(config['log_file'], "a") as log:
+            log.write(f"SKIP: {folder_id} - Disk space critical ({worker_free // (2**30)}GB left).\n")
+        return {"status": "SKIP", "folder_id": folder_id, "reason": "Disk space safety constraints tripped"}
+
     # Build execution command
-    #   -c:v: video codec (coder/decoder) to use for encoding. Value
-    #       depends on whether GPU acceleration is enabled.
-    #   -rc: use Variable Bit Rate mode, allowing encoder to use more data
-    #       for complex scenes (moving fish) and less for static ones
-    #   -cq: "constant quality" setting for GPU encoder. Lower numbers (10)
-    #       prioritize high visual detail. GPU equivalent of CRF.
-    #   -crf: "constant rate factor" quality setting for CPU encoder. Lower
-    #       values (10) prioritize high visual detail. CPU equivalent of CQ
-    #   -b:v: target bitrate for output video. Set to 0 to disable default
-    #       bitrate cap and strictly follow `-cq` settings
-    #   -maxrate: maximum rate to prevent file size from exploding during
-    #       extremely complex frames
-    #   -bufsize: buffer size telling the encoder how much video to look at
-    #       when deciding how to distribute the bitrate
-    #   -preset: encoding preset; higher quality presets take longer to
-    #       encode. Use "p7" for highest quality.
-    #   -y: overwrite output file if it exists without asking permission
-    #   -map: select the output from the filter
-    #   -an: exclude audio from new file
-    #   -t: duration of the output video
     if config['use_gpu']:
         encoder_args = [
             "-c:v", "h264_nvenc",
             "-rc", "vbr",
         ]
         if is_auto_mode:
-            # Archival bitrate targeting (ABR/VBR)
             encoder_args += ["-b:v", target_bitrate, "-maxrate", "100M", "-bufsize", "100M"]
         else:
-            # Manual Constant Quality Parameter (CQP) override
             encoder_args += ["-b:v", "0", "-cq", str(config['quality_crf'])]
         encoder_args += ["-preset", "p7"]
     else:
@@ -683,10 +669,8 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
             "-c:v", "libx264",
         ]
         if is_auto_mode:
-            # Archival Bitrate Targeting (ABR)
             encoder_args += ["-b:v", target_bitrate]
         else:
-            # Manual Constant Rate Factor (CRF) override
             encoder_args += ["-crf", str(config['quality_crf'])]
         encoder_args += ["-preset", "medium"]
     
@@ -707,28 +691,38 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
         output_path
     ]
 
-    # Re-check free space before starting this worker's encode
-    _, _, worker_free = shutil.disk_usage(config['output_directory'])
-    if (worker_free // (2**30)) < config['min_gb_required'] and process:
-        with open(config['log_file'], "a") as log:
-            log.write(f"SKIP: {folder_id} - Disk space critical ({worker_free // (2**30)}GB left).\n")
-        return {"status": "SKIP", "folder_id": folder_id}
-
-    # Run the command and log any errors
+    # 7. EXECUTION WITH AUTO-RETRY LOOP
     result = MockResult()
     if process:
-        try:
-            # Add a timeout to prevent infinite hangs
-            timeout_val = int(config['timeout_minutes']) * 60 if config.get('timeout_minutes') else None
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_val)
-        except subprocess.TimeoutExpired:
-            print(f"\nERROR: ffmpeg timed out on {folder_id}. Is the network drive disconnected?")
-            return {"status": "ERROR", "folder_id": folder_id, "error_msg": "FFmpeg timed out."}
-            
+        max_attempts = int(config.get('max_retries', 2)) + 1
+        timeout_val = int(config['timeout_minutes']) * 60 if config.get('timeout_minutes') else None
+        
+        for attempt in range(1, max_attempts + 1):
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_val)
+                break 
+            except subprocess.TimeoutExpired:
+                with open(config['log_file'], "a") as log:
+                    log.write(f"TIMEOUT NOTICE: Deployment {folder_id} timed out on attempt {attempt}/{max_attempts}.\n")
+                if attempt == max_attempts:
+                    return {
+                        "status": "ERROR", 
+                        "folder_id": folder_id, 
+                        "error_type": "FFmpeg Timeout", 
+                        "error_msg": f"Execution halted after timing out consistently across {max_attempts} distinct attempts."
+                    }
+                time.sleep(5) 
+                continue
+                
         if result.returncode != 0:
             with open(config['log_file'], "a") as log:
                 log.write(f"ERROR in {folder_id}: {result.stderr}\n")
-            return {"status": "ERROR", "folder_id": folder_id, "error_msg": result.stderr}
+            return {
+                "status": "ERROR", 
+                "folder_id": folder_id, 
+                "error_type": "FFmpeg Fatal Exit Code", 
+                "error_msg": result.stderr.strip().split('\n')[-1]
+            }
     
     # Calculate actual metrics for the final video
     if os.path.exists(output_path):
@@ -748,6 +742,7 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     expectations_table_lines.append(f"    BITRATE             | {int(target_bitrate)/1_000_000:.2f} Mbps {' ':<1} --> {actual_bitrate/1_000_000:.2f} Mbps")
     expectations_table_lines.append(f"    INFORMATION DENSITY | {avg_bpp_src:.4f} BPP {' ':<1} --> {actual_bpp:.4f} BPP")
     expectations_table_str = "\n".join(expectations_table_lines) +"\n"
+    
     if config['diagnostic_mode']:
         iter_duration = time.perf_counter() - iter_start
         if iter_duration > 60:
@@ -798,14 +793,14 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
                  space).
     """
 
-    if not all([is_bpp_ideal_90, is_size_ideal_90]):
-        log_and_print(warning_90, config['log_file'])
-        log_and_print(quality_note, config['log_file'])
-    elif not all([is_bpp_ideal_80, is_size_ideal_80]):
-        log_and_print(warning_80, config['log_file'])
-        log_and_print(quality_note, config['log_file'])
+    # Append multi-line warnings to log file
+    with open(config['log_file'], "a") as log:
+        if not all([is_bpp_ideal_90, is_size_ideal_90]):
+            log.write(f"{warning_90}\n{quality_note}\n")
+        elif not all([is_bpp_ideal_80, is_size_ideal_80]):
+            log.write(f"{warning_80}\n{quality_note}\n")
 
-    # GCP serial upload
+    # GCP high-speed pipeline upload block
     upload_status = "PENDING"
     throughput_rate = "Unknown"
     
@@ -814,7 +809,6 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
             gcloud_exec = shutil.which("gcloud")
             cmd_up = [gcloud_exec, "storage", "cp", output_path, config['gcp_bucket_path']]
             
-            # Start the process with a pipe for stderr (where gcloud sends status info)
             process_up = subprocess.Popen(
                 cmd_up,
                 stdout=subprocess.PIPE,
@@ -824,7 +818,6 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
                 universal_newlines=True
             )
 
-            # Read the stderr stream line-by-line while the process runs
             full_output = []
             while True:
                 line = process_up.stderr.readline()
@@ -833,25 +826,17 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
                 if line:
                     clean_line = line.strip()
                     full_output.append(clean_line)
-                    # Optional: Uncomment the next line if you want to see raw lines in the log
-                    # log.write(f"[GCP DEBUG] {clean_line}\n")
 
-            # Wait for process to finish and check return code
             return_code = process_up.wait()
             
             if return_code == 0:
                 upload_status = "SUCCESS"
-                
-                # Parse the output for the through-rate (usually on the last or 2nd to last line)
-                # gcloud typically reports: "Average throughput: 85.4MiB/s"
                 for out_line in reversed(full_output):
                     if "throughput" in out_line.lower():
                         throughput_rate = out_line.split(":")[-1].strip()
                         break
                 
-                # Report to console without breaking tqdm bars
                 tqdm.write(f"  > {folder_id} uploaded to GCP at {throughput_rate}")
-                
                 if config.get('delete_local_after_upload'):
                     os.remove(output_path)
             else:
@@ -861,14 +846,23 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
         except Exception as e:
             upload_status = f"FAILED: {str(e)}"
 
-    # Print table if successful
+    # Save verification tables directly to files
     if result.returncode == 0:
         with open(config['log_file'], "a") as log:
             log.write(full_table_str)
         if config['diagnostic_mode']:
-            print(full_table_str)
+            tqdm.write(full_table_str)
 
-    return {"status": "SUCCESS", "folder_id": folder_id, "upload_status": upload_status, "output_path": output_path}
+    return {
+        "status": "SUCCESS", 
+        "folder_id": folder_id, 
+        "upload_status": upload_status, 
+        "output_path": output_path,
+        "targets": {
+            "bpp_80": is_bpp_ideal_80, "size_80": is_size_ideal_80,
+            "bpp_90": is_bpp_ideal_90, "size_90": is_size_ideal_90
+        }
+    }
 
 # =============================================================================
 # MAIN ROUTINE
@@ -884,6 +878,7 @@ def process_deployments(config_path: str = 'configurations.yml', process=True):
     config['diagnostic_mode'] = config.get('diagnostic_mode', False)
     config['gcp_upload'] = config.get('gcp_upload', False)
     config['log_file'] = config.get('log_file', 'processing_log.txt')
+    config['max_retries'] = config.get('max_retries', 2)
     config['min_gb_required'] = config.get('min_gb_required', 10)
     config['num_workers'] = config.get('num_workers', 1)
     config['output_fps'] = config.get('output_fps', 'auto')
@@ -952,9 +947,15 @@ def process_deployments(config_path: str = 'configurations.yml', process=True):
     df[config['col_folder_name']] = df[config['col_folder_name']].str.strip()
     df['start_time_ceil'] = df[config['col_start_time']].apply(time_ceiling)
 
-    print(f"  > Processing {int(df.shape[0])} deployments. This may take some time.\n", flush=True)
+    print(f"  > Processing {int(df.shape[0])} deployments. Monitoring progress...\n", flush=True)
     tasks = df.to_dict('records')
     failed_uploads, overall_success = [], True
+
+    # Multi-threaded batch execution tracking registries
+    errors_by_type = defaultdict(list)
+    missed_metrics = defaultdict(list)
+    skipped_deployments = defaultdict(list)
+    success_count = 0
 
     # Total progress bar
     custom_format = "{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt}"
@@ -974,26 +975,73 @@ def process_deployments(config_path: str = 'configurations.yml', process=True):
         for future in as_completed(futures):
             result = future.result()
             pbar.update(1)
+            folder_id = result['folder_id']
             
-            # Loud-Crash Logic for systemic errors
+            # Non-blocking collection of worker process hard termination errors
             if result['status'] == "ERROR":
-                error_msg = result.get('error_msg', 'Unknown execution error.')
-                pbar.close()
+                err_type = result.get('error_type', 'Unclassified Functional Error')
+                err_msg = result.get('error_msg', 'No trace log strings provided.')
+                errors_by_type[err_type].append(f"{folder_id} -> {err_msg}")
+                overall_success = False
                 
-                # Report the error loudly to the console
-                print("\n" + "!" * 80)
-                print(f"CRITICAL FFMPEG FAILURE IN DEPLOYMENT: {result['folder_id']}")
-                print("-" * 80)
-                print(f"RAW ERROR LOG:\n\n{error_msg}")
-                print("!" * 80 + "\n")
+            elif result['status'] == "SKIP":
+                reason = result.get('reason', 'Skipped')
+                skipped_deployments[reason].append(folder_id)
                 
-                # Shutdown the executor and exit with a non-zero code
-                print("[!] SYSTEMIC ERROR: Aborting script to prevent log flooding. Fix the error above.")
-                executor.shutdown(wait=False, cancel_futures=True)
-                sys.exit(1)
+            elif result['status'] == "SUCCESS":
+                success_count += 1
+                t_flags = result.get('targets', {})
+                missed_list = []
+                if not t_flags.get('bpp_80'): missed_list.append("Missed 80% BPP target")
+                if not t_flags.get('size_80'): missed_list.append("Missed 80% file size target")
+                if not t_flags.get('bpp_90'): missed_list.append("Missed 90% BPP target")
+                if not t_flags.get('size_90'): missed_list.append("Missed 90% file size target")
                 
-            if result.get('status') == "SUCCESS" and result.get('upload_status').startswith("FAILED"):
-                failed_uploads.append(result['output_path'])
+                if missed_list:
+                    missed_metrics[folder_id] = missed_list
+
+                if result.get('upload_status') and not result['upload_status'] == "SUCCESS":
+                    failed_uploads.append(result['output_path'])
+
+    pbar.close()
+
+    # 3. UNIFIED FINAL LEDGER MASTER RECORD BLOCK
+    summary_lines = []
+    summary_lines.append(f"\n{'='*80}\n{'FINAL BATCH PROCESSING EXECUTION SUMMARY REPORT':^80}\n{'='*80}")
+    summary_lines.append(f"Successfully Completed Pipelines: {success_count} / {len(tasks)}")
+    summary_lines.append(f"Total Unique Deployments Skipped: {sum(len(v) for v in skipped_deployments.values())}")
+    summary_lines.append(f"Total Hard Failures Encountered:  {sum(len(v) for v in errors_by_type.values())}\n")
+
+    if skipped_deployments:
+        summary_lines.append(f"{'-'*10} CLASSIFIED BATCH BYPASS RECORDS (SKIPPED FILES) {'-'*10}")
+        for skip_reason, list_folders in skipped_deployments.items():
+            summary_lines.append(f"  -> {skip_reason}: {len(list_folders)} deployments affected.")
+
+    if errors_by_type:
+        summary_lines.append(f"\n{'!'*10} CLASSIFIED CRITICAL ERROR GROUPS {'!'*10}")
+        for err_title, deployments in errors_by_type.items():
+            summary_lines.append(f"\n* Error Category: {err_title} ({len(deployments)} deployments affected):")
+            for d in deployments[:15]:  # Display first 15 records explicitly
+                summary_lines.append(f"    -> {d}")
+            if len(deployments) > 15:
+                summary_lines.append(f"    ... and {len(deployments) - 15} additional failures grouped under this category.")
+
+    if missed_metrics:
+        summary_lines.append(f"\n{'-'*10} QUALITY BENCHMARK METRIC VARIATIONS (80% / 90% Threshold Misses) {'-'*10}")
+        summary_lines.append(f"Total Folders with Quality Variations: {len(missed_metrics)}")
+        for idx, (f_id, faults) in enumerate(missed_metrics.items(), start=1):
+            if idx <= 20:  # Trace first 20 explicitly inside standard logging output strings
+                summary_lines.append(f"  -> Deployment {f_id}: {', '.join(faults)}")
+        if len(missed_metrics) > 20:
+            summary_lines.append(f"  ... and {len(missed_metrics) - 20} more deployments missing visual targets.")
+
+    summary_lines.append(f"\n{'='*80}\n")
+    master_summary_str = "\n".join(summary_lines)
+
+    # Output metrics directly to file and terminal
+    with open(config['log_file'], "a") as log:
+        log.write(master_summary_str)
+    print(master_summary_str)
 
     # Retry any failed GCP uploads
     if failed_uploads:
