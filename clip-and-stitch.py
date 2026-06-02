@@ -377,7 +377,6 @@ def get_gopro_sort_key(filename: str):
         return (int(rec_id), int(chapter))
     return (0, 0)
 
-
 # =============================================================================
 # WORKER TASK: PROCESS SINGLE DEPLOYMENT
 # =============================================================================
@@ -406,42 +405,55 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     folder_id = str(row[config['col_folder_name']]).strip()
     start_time_ceil = str(row['start_time_ceil']).strip()
 
+    # Initialize log block for parallel processing
+    log_payload = ""
+
     # Input and output directories
     folder_path = os.path.join(config['input_directory'], folder_id)
     if not os.path.exists(folder_path):
-        with open(config['log_file'], "a") as log:
-            log.write(f"SKIP: Folder {folder_path} not found.\n")
-        return {"status": "SKIP", "folder_id": folder_id, "reason": "Folder path not found"}
+        log_payload += f"SKIP: Folder {folder_path} not found.\n"
+        return {"status": "SKIP", "folder_id": folder_id, "reason": "Video folder path not found", "log_payload": log_payload}
+        
     output_path = os.path.join(
         config['output_directory'], f"{folder_id}{config['video_extension']}"
         )
 
     # Skip if output exists and reprocess is false
     if not config['reprocess'] and os.path.exists(output_path):
-        with open(config['log_file'], "a") as log:
-            log.write(f"{os.path.basename(output_path)} exists and reprocess is set to False. Nothing to process. Skipping.\n")
-        return {"status": "SKIP", "folder_id": folder_id, "reason": "Output video already exists"}
+        log_payload += f"{os.path.basename(output_path)} exists and reprocess is set to False. Nothing to process. Skipping.\n"
+        return {"status": "SKIP", "folder_id": folder_id, "reason": "Output video already exists", "log_payload": log_payload}
 
     # Skip and log any folder listed in the CSV that doesn't exist in the input
     # directory
     if not os.path.exists(folder_path):
-        with open(config['log_file'], "a") as log:
-            log.write(f"SKIP: Folder {folder_id} not found.\n")
-        return {"status": "SKIP", "folder_id": folder_id, "reason": "Folder path not found"}
+        log_payload += f"SKIP: Folder {folder_id} not found.\n"
+        return {"status": "SKIP", "folder_id": folder_id, "reason": "Folder path not found", "log_payload": log_payload}
 
     # 3. GATHER & SORT FILES
     video_files = [f for f in os.listdir(folder_path) 
                     if f.upper().endswith(config['video_extension'].upper())]
     if not video_files:
-        with open(config['log_file'], "a") as log:
-            log.write(f"SKIP: No videos in {folder_id}.\n")
-        return {"status": "SKIP", "folder_id": folder_id, "reason": "No matched video extension files inside directory"}
+        log_payload += f"SKIP: No videos in {folder_id}.\n"
+        return {"status": "SKIP", "folder_id": folder_id, "reason": "No matched video extension files inside directory", "log_payload": log_payload}
     video_files.sort(key=get_gopro_sort_key)
 
     # 4. CALCULATE TIMELINE
     # Resolve frame rates (`source_fps` will come from video metadata)
     first_file_path = os.path.join(folder_path, video_files[0])
-    _, source_fps, _, _, _ = get_video_metadata(file_path=first_file_path, ffprobe_path=ffprobe_exe)
+    
+    # Prevent unhandled crashes from bad files
+    try:
+        _, source_fps, _, _, _ = get_video_metadata(file_path=first_file_path, ffprobe_path=ffprobe_exe)
+    except Exception as e:
+        log_payload += f"ERROR: Primary metadata extraction failed on first file {first_file_path} in folder {folder_id}. Details: {str(e)}\n"
+        return {
+            "status": "ERROR",
+            "folder_id": folder_id,
+            "error_type": "Metadata Corruption (FFprobe Failure)",
+            "error_msg": f"Failed to parse initial file structure for '{os.path.basename(first_file_path)}'. Underlying crash: {type(e).__name__}: {str(e)}",
+            "log_payload": log_payload
+        }
+
     start_time_fps = float(config['start_time_fps'])
     raw_target = str(config['output_fps']).lower()
     output_fps = source_fps if raw_target == 'auto' else float(raw_target)
@@ -470,7 +482,20 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     file_data = []
     for f in video_files:
         full_p = os.path.join(folder_path, f)
-        dur, source_fps, br, w, h = get_video_metadata(file_path=full_p, ffprobe_path=ffprobe_exe)
+        
+        # SHIELDED LOOP METADATA PROBE: Intercept bad chapters and return structural context
+        try:
+            dur, source_fps, br, w, h = get_video_metadata(file_path=full_p, ffprobe_path=ffprobe_exe)
+        except Exception as e:
+            log_payload += f"ERROR: Metadata extraction failed on file {full_p}. Details: {str(e)}\n"
+            return {
+                "status": "ERROR",
+                "folder_id": folder_id,
+                "error_type": "Metadata Corruption (FFprobe Failure)",
+                "error_msg": f"Failed to parse intermediate chapter file components for '{f}'. Structural data is likely missing or corrupt. Underlying crash: {type(e).__name__}: {str(e)}",
+                "log_payload": log_payload
+            }
+
         file_data.append({
             'path': full_p,
             'duration': dur,
@@ -514,9 +539,8 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
 
     # If no footage matches the 24-minute window, log and skip
     if not needed_files:
-        with open(config['log_file'], "a") as log:
-            log.write(f"SKIP: {folder_id} - No footage found for the requested time window.\n")
-        return {"status": "SKIP", "folder_id": folder_id, "reason": "No overlapping footage found within clipping window"}
+        log_payload += f"SKIP: {folder_id} - No footage found for the requested time window.\n"
+        return {"status": "SKIP", "folder_id": folder_id, "reason": "No overlapping footage found within clipping window", "log_payload": log_payload}
 
     # 5. CLIP AND STITCH
     # See https://ffmpeg.org/ffmpeg.html
@@ -548,10 +572,6 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
         tqdm.write(f"  > Targeting bitrate {int(target_bitrate)/1_000_000:.2f} Mbps to match source density.")
 
     # Build the filter string: e.g., `[0:v][1:v]concat=n=2:v=1[outv]`:
-    # Concatenate video (v) from files 0-n into 1 video stream.
-    # Force the frame rate (fps=fps={fps}) right after the concat to prevent
-    # drift during the stitch. 'round=near' prevents frame drops due to math
-    # drift.
     fps_logic = f"fps=fps={output_fps}:round=near"
     if raw_target != 'auto':
         fps_logic += f",setpts=N/({output_fps}*TB)"
@@ -561,41 +581,7 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
         f"{fps_logic}[outv]"
     )
     filter_complex_parts.append(concat_part)
-    
-    # Get fonts to prevent potential crashes on Windows
-    if config['diagnostic_mode']:
-        # Safeguard against missing fonts on Windows systems with OS-specific
-        # font selections
-        if sys.platform.startswith("win"):
-            font_path = r"C\:/Windows/Fonts/arial.ttf"
-        elif sys.platform == "darwin":
-            font_path = "/Library/Fonts/Arial.ttf"
-        else:
-            font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
-
-        # Check if the font actually exists before trying to use it
-        check_path = font_path.replace(r"C\:", "C:").replace("\\", "")
-        if not os.path.exists(check_path) and not sys.platform.startswith("win"):
-            tqdm.write("WARNING: Default font not found. Diagnostic text may fail.")
-
-        # Embed a diagnostic timestamp for the stitched video
-        # This needs to be "fudged" if the desired output frame rate differs
-        # from the frame rate used to determine the start time (i.e., if
-        # start_time_fps != output_fps) in order for this time to match the
-        # media player frame rate
-        fudged_time = f"(t*{output_fps}/{start_time_fps})"
-        drawtext_filter = (
-            f"[outv]drawtext=fontfile='{font_path}':"
-            r"text='%{eif\:" + fudged_time + r"/3600\:d\:2}\:" + \
-            r"%{eif\:mod(" + fudged_time + r"/60,60)\:d\:2}\:" + \
-            r"%{eif\:mod(" + fudged_time + r",60)\:d\:2}\:" + \
-            r"%{eif\:" + str(start_time_fps) + r"*mod(" + fudged_time + r",1)\:d\:2}':"
-            "x=10:y=10:fontsize=48:fontcolor=white:box=1:boxcolor=black@0.5[diagout]"
-        )
-        filter_complex_parts.append(drawtext_filter)
-        maparg = "[diagout]"
-    else:
-        maparg = "[outv]"
+    maparg = "[outv]"
 
     # Join all filter parts with semicolons
     filter_str = "; ".join(filter_complex_parts)
@@ -649,25 +635,19 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     # Re-check free space before starting this worker's encode
     _, _, worker_free = shutil.disk_usage(config['output_directory'])
     if (worker_free // (2**30)) < config['min_gb_required'] and process:
-        with open(config['log_file'], "a") as log:
-            log.write(f"SKIP: {folder_id} - Disk space critical ({worker_free // (2**30)}GB left).\n")
-        return {"status": "SKIP", "folder_id": folder_id, "reason": "Disk space safety constraints tripped"}
+        log_payload += f"SKIP: {folder_id} - Disk space critical ({worker_free // (2**30)}GB left).\n"
+        return {"status": "SKIP", "folder_id": folder_id, "reason": "Disk space safety constraints tripped", "log_payload": log_payload}
 
     # Build execution command
     if config['use_gpu']:
-        encoder_args = [
-            "-c:v", "h264_nvenc",
-            "-rc", "vbr",
-        ]
+        encoder_args = ["-c:v", "h264_nvenc", "-rc", "vbr"]
         if is_auto_mode:
             encoder_args += ["-b:v", target_bitrate, "-maxrate", "100M", "-bufsize", "100M"]
         else:
             encoder_args += ["-b:v", "0", "-cq", str(config['quality_crf'])]
         encoder_args += ["-preset", "p7"]
     else:
-        encoder_args = [
-            "-c:v", "libx264",
-        ]
+        encoder_args = ["-c:v", "libx264"]
         if is_auto_mode:
             encoder_args += ["-b:v", target_bitrate]
         else:
@@ -702,26 +682,26 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
                 result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_val)
                 break 
             except subprocess.TimeoutExpired:
-                with open(config['log_file'], "a") as log:
-                    log.write(f"TIMEOUT NOTICE: Deployment {folder_id} timed out on attempt {attempt}/{max_attempts}.\n")
+                log_payload += f"TIMEOUT NOTICE: Deployment {folder_id} timed out on attempt {attempt}/{max_attempts}.\n"
                 if attempt == max_attempts:
                     return {
                         "status": "ERROR", 
                         "folder_id": folder_id, 
                         "error_type": "FFmpeg Timeout", 
-                        "error_msg": f"Execution halted after timing out consistently across {max_attempts} distinct attempts."
+                        "error_msg": f"Execution halted after timing out consistently across {max_attempts} distinct attempts.",
+                        "log_payload": log_payload
                     }
                 time.sleep(5) 
                 continue
                 
         if result.returncode != 0:
-            with open(config['log_file'], "a") as log:
-                log.write(f"ERROR in {folder_id}: {result.stderr}\n")
+            log_payload += f"ERROR in {folder_id}: {result.stderr}\n"
             return {
                 "status": "ERROR", 
                 "folder_id": folder_id, 
                 "error_type": "FFmpeg Fatal Exit Code", 
-                "error_msg": result.stderr.strip().split('\n')[-1]
+                "error_msg": result.stderr.strip().split('\n')[-1],
+                "log_payload": log_payload
             }
     
     # Calculate actual metrics for the final video
@@ -758,30 +738,22 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     is_bpp_ideal_90 = avg_bpp_src * 0.90 <= actual_bpp <= avg_bpp_src * 1.10
     is_size_ideal_90 = cumulative_size * 0.90 <= actual_size <= cumulative_size * 1.10
 
-    with open(config['log_file'], "a") as log:
-        log.write(f"\nSUMMARY OF FOLDER {folder_id}:\n")
-        log.write(f"    Estimated output video size without visual quality loss: {cumulative_size / (2**30):.2f} GB\n")
-        log.write(f"    Estimated target bitrate to maintain visual fidelity: {int(target_bitrate)/1_000_000:.2f} Mbps\n")
-        log.write(f"    Average information density of original videos: {avg_bpp_src:.4f} bits per pixel (BPP)\n")
-        log.write(' '*30 + '* '*10 + '\n\n')
-        log.write(f"    Output video file size: {actual_size / (2**30):.2f} GB\n")
-        log.write(f"    Output video bitrate:   {actual_bitrate/1_000_000:.2f} Mbps\n")
-        log.write(f"    Information density:    {actual_bpp:.4f} BPP\n\n")
-        log.write(f"    -> Within 80% of original average BPP:  {'YES' if is_bpp_ideal_80 else 'NO  X'}\n")
-        log.write(f"    -> Within 80% of estimated file size:   {'YES' if is_size_ideal_80 else 'NO  X'}\n")
-        log.write(f"    -> Within 90% of original average BPP:  {'YES' if is_bpp_ideal_90 else 'NO  X'}\n")
-        log.write(f"    -> Within 90% of estimated file size:   {'YES' if is_size_ideal_90 else 'NO  X'}\n")
+    # Append evaluation summaries safely directly into the local string payload
+    log_payload += f"\nSUMMARY OF FOLDER {folder_id}:\n"
+    log_payload += f"    Estimated output video size without visual quality loss: {cumulative_size / (2**30):.2f} GB\n"
+    log_payload += f"    Estimated target bitrate to maintain visual fidelity: {int(target_bitrate)/1_000_000:.2f} Mbps\n"
+    log_payload += f"    Average information density of original videos: {avg_bpp_src:.4f} bits per pixel (BPP)\n"
+    log_payload += ' '*30 + '* '*10 + '\n\n'
+    log_payload += f"    Output video file size: {actual_size / (2**30):.2f} GB\n"
+    log_payload += f"    Output video bitrate:   {actual_bitrate/1_000_000:.2f} Mbps\n"
+    log_payload += f"    Information density:    {actual_bpp:.4f} BPP\n\n"
+    log_payload += f"    -> Within 80% of original average BPP:  {'YES' if is_bpp_ideal_80 else 'NO  X'}\n"
+    log_payload += f"    -> Within 80% of estimated file size:   {'YES' if is_size_ideal_80 else 'NO  X'}\n"
+    log_payload += f"    -> Within 90% of original average BPP:  {'YES' if is_bpp_ideal_90 else 'NO  X'}\n"
+    log_payload += f"    -> Within 90% of estimated file size:   {'YES' if is_size_ideal_90 else 'NO  X'}\n"
 
     # Centralized multi-line notes and warnings
-    quality_note = """
-        NOTE: This utility uses a `libx264` (CPU) encoder that is generally more
-        efficient than the GoPro's internal hardware. This means you will often
-        find that an output file with a lower bitrate than the original actually
-        contains the same amount of visual information. Your target shouldn't
-        necessarily be an identical file size, but rather a file size that stays
-        within 80-90% of the original and a BPP within 80% of the original in
-        order to maintain "visually lossless" quality.
-    """
+    quality_note = ""
     warning_90 = """
         WARNING: Output video is NOT within 90% of the original BPP and/or file
                  size. Output may be too small (quality loss) or too large (wasted
@@ -793,12 +765,10 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
                  space).
     """
 
-    # Append multi-line warnings to log file
-    with open(config['log_file'], "a") as log:
-        if not all([is_bpp_ideal_90, is_size_ideal_90]):
-            log.write(f"{warning_90}\n{quality_note}\n")
-        elif not all([is_bpp_ideal_80, is_size_ideal_80]):
-            log.write(f"{warning_80}\n{quality_note}\n")
+    if not all([is_bpp_ideal_90, is_size_ideal_90]):
+        log_payload += f"{warning_90}\n{quality_note}\n"
+    elif not all([is_bpp_ideal_80, is_size_ideal_80]):
+        log_payload += f"{warning_80}\n{quality_note}\n"
 
     # GCP high-speed pipeline upload block
     upload_status = "PENDING"
@@ -846,13 +816,12 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
         except Exception as e:
             upload_status = f"FAILED: {str(e)}"
 
-    # Save verification tables directly to files
     if result.returncode == 0:
-        with open(config['log_file'], "a") as log:
-            log.write(full_table_str)
+        log_payload += full_table_str
         if config['diagnostic_mode']:
             tqdm.write(full_table_str)
 
+    # Return the entire un-clipped string package smoothly to the parent thread
     return {
         "status": "SUCCESS", 
         "folder_id": folder_id, 
@@ -861,7 +830,8 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
         "targets": {
             "bpp_80": is_bpp_ideal_80, "size_80": is_size_ideal_80,
             "bpp_90": is_bpp_ideal_90, "size_90": is_size_ideal_90
-        }
+        },
+        "log_payload": log_payload
     }
 
 # =============================================================================
@@ -977,6 +947,11 @@ def process_deployments(config_path: str = 'configurations.yml', process=True):
             pbar.update(1)
             folder_id = result['folder_id']
             
+            # Write log
+            if result.get('log_payload'):
+                with open(config['log_file'], "a") as log:
+                    log.write(result['log_payload'])
+            
             # Non-blocking collection of worker process hard termination errors
             if result['status'] == "ERROR":
                 err_type = result.get('error_type', 'Unclassified Functional Error')
@@ -1008,32 +983,27 @@ def process_deployments(config_path: str = 'configurations.yml', process=True):
     # 3. UNIFIED FINAL LEDGER MASTER RECORD BLOCK
     summary_lines = []
     summary_lines.append(f"\n{'='*80}\n{'FINAL BATCH PROCESSING EXECUTION SUMMARY REPORT':^80}\n{'='*80}")
-    summary_lines.append(f"Successfully Completed Pipelines: {success_count} / {len(tasks)}")
-    summary_lines.append(f"Total Unique Deployments Skipped: {sum(len(v) for v in skipped_deployments.values())}")
-    summary_lines.append(f"Total Hard Failures Encountered:  {sum(len(v) for v in errors_by_type.values())}\n")
+    summary_lines.append(f"Successfully processed deployments: {success_count} / {len(tasks)}")
+    summary_lines.append(f"Number of skipped deployments: {sum(len(v) for v in skipped_deployments.values())}")
+    summary_lines.append(f"Number of hard failures encountered:  {sum(len(v) for v in errors_by_type.values())}\n")
 
     if skipped_deployments:
-        summary_lines.append(f"{'-'*10} CLASSIFIED BATCH BYPASS RECORDS (SKIPPED FILES) {'-'*10}")
+        summary_lines.append(f"{'-'*18} SKIPPED FILES {'-'*18}")
         for skip_reason, list_folders in skipped_deployments.items():
             summary_lines.append(f"  -> {skip_reason}: {len(list_folders)} deployments affected.")
 
     if errors_by_type:
-        summary_lines.append(f"\n{'!'*10} CLASSIFIED CRITICAL ERROR GROUPS {'!'*10}")
+        summary_lines.append(f"\n{'!'*15} ERRORS ENCOUNTERED {'!'*15}")
         for err_title, deployments in errors_by_type.items():
-            summary_lines.append(f"\n* Error Category: {err_title} ({len(deployments)} deployments affected):")
-            for d in deployments[:15]:  # Display first 15 records explicitly
-                summary_lines.append(f"    -> {d}")
-            if len(deployments) > 15:
-                summary_lines.append(f"    ... and {len(deployments) - 15} additional failures grouped under this category.")
+            summary_lines.append(f"\n * Error Category: {err_title} ({len(deployments)} deployments affected):")
+            for d in deployments:
+                summary_lines.append(f"   -> {d}")
 
     if missed_metrics:
-        summary_lines.append(f"\n{'-'*10} QUALITY BENCHMARK METRIC VARIATIONS (80% / 90% Threshold Misses) {'-'*10}")
+        summary_lines.append(f"\n{'-'*10} QUALITY THRESHOLD (80% / 90%) MISSES {'-'*10}")
         summary_lines.append(f"Total Folders with Quality Variations: {len(missed_metrics)}")
         for idx, (f_id, faults) in enumerate(missed_metrics.items(), start=1):
-            if idx <= 20:  # Trace first 20 explicitly inside standard logging output strings
-                summary_lines.append(f"  -> Deployment {f_id}: {', '.join(faults)}")
-        if len(missed_metrics) > 20:
-            summary_lines.append(f"  ... and {len(missed_metrics) - 20} more deployments missing visual targets.")
+            summary_lines.append(f"  -> Deployment {f_id}: {', '.join(faults)}")
 
     summary_lines.append(f"\n{'='*80}\n")
     master_summary_str = "\n".join(summary_lines)
@@ -1060,15 +1030,20 @@ if __name__ == "__main__":
     # Script timer
     script_start = time.perf_counter()
 
-    # Launch the script and only print success message if it returns True
+    # Launch the script and sweep through deployments
     success, log = process_deployments(
         config_path=args.config_path, process=args.process
-        )
-    if success:
-        script_duration = time.perf_counter() - script_start
-        if script_duration > 60:
-            runtime = f"{script_duration/60:.2f} minutes"
-        else:
-            runtime = f"{script_duration:.2f} seconds"
-        print(f"\nProcessing complete. Total runtime: {runtime}. Check "
-              f"{log} for details.", flush=True)
+    )
+    
+    # Calculate total script processing runtime duration
+    script_duration = time.perf_counter() - script_start
+    if script_duration > 60:
+        runtime = f"{script_duration/60:.2f} minutes"
+    else:
+        runtime = f"{script_duration:.2f} seconds"
+        
+    status_msg = "SUCCESSFULLY COMPLETED" if success else "COMPLETED WITH FUNCTIONAL ERRORS"
+    
+    print(f"\n{status_msg}")
+    print(f"Total overall runtime: {runtime}.")
+    print(f"Review '{log}' for detailed metrics.", flush=True)
