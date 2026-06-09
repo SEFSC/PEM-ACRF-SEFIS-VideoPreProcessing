@@ -80,19 +80,42 @@ class MockResult:
     stderr = "Execution suppressed by --no-process"
 
 def validate_config(config: dict):
-    """Checks for typos in the YAML and suggests the closest valid key.
+    """Checks for missing mandatory keys and typos in the YAML. Suggests the
+    closest-match valid key for any invalid key found.
     
     Arguments
     ---------
     config (dict): dictionary of configuration settings to validate
     """
+    # Check for missing mandatory entries
+    REQUIRED_KEYS = {'col_folder_name', 'col_start_time', 'csv_path',
+                     'input_directory', 'output_directory'}
+    missing = [f"  - '{k}'" for k in REQUIRED_KEYS if k not in config]
+    
+    if missing:
+        error_msg = (
+            "\n[!] CONFIGURATION ERROR: Missing mandatory settings in YAML:\n" +
+            "\n".join(missing) +
+            "\n\nThe pipeline cannot start without these core paths defined."
+        )
+        raise ValueError(error_msg)
+
+    # Check for typos or unrecognized keys
     VALID_KEYS = {
         'clear_log', 'col_folder_name', 'col_start_time', 'csv_path',
-        'delete_local_after_upload', 'diagnostic_mode', 'ffmpeg_path',
-        'ffprobe_path', 'gcp_bucket_path', 'gcp_upload', 'input_directory',
-        'log_file', 'max_retries', 'min_gb_required', 'num_workers',
-        'output_directory', 'output_fps', 'time_buffer_minutes', 'quality_crf',
-        'reprocess', 'start_time_fps', 'timeout_minutes', 'use_gpu',
+        'delete_local_after_upload', 'diagnostic_mode',
+        'ffmpeg_path', 'ffprobe_path',
+        'gcp_bucket_path', 'gcp_upload',
+        'input_directory',
+        'log_file',
+        'max_retries', 'min_gb_required',
+        'num_workers',
+        'output_directory', 'output_fps',
+        'quality_crf',
+        'reprocess',
+        'skip_partial_videos', 'start_time_fps',
+        'time_buffer_minutes', 'timeout_minutes',
+        'use_gpu',
         'video_duration_minutes', 'video_extension'
     }
     
@@ -284,7 +307,7 @@ def get_ffmpeg_command(config: dict, tool: Literal["ffmpeg", "ffprobe"] = "ffmpe
         
     # 2. Fallback to config file
     config_key = f"{tool}_path"
-    config_val = config.get(config_key)
+    config_val = config[config_key]
     if config_val and os.path.exists(config_val):
         return config_val
         
@@ -381,7 +404,7 @@ def get_gopro_sort_key(filename: str):
 # WORKER TASK: PROCESS SINGLE DEPLOYMENT
 # =============================================================================
 
-def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_exe: str, process: bool, pbar_pos: int) -> dict:
+def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_exe: str, process: bool, remote_inventory: set = None) -> dict:
     """Standalone task for processing one deployment.
     
     Arguments
@@ -392,7 +415,8 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     ffprobe_exe (str): file path to `ffprobe_exe`
     process (bool): if False, suppresses FFmpeg execution while still logging
             for dry run troubleshooting
-    pbar_pos (int): vertical position for the tqdm progress bar
+    remote_inventory (set): standalone memory cache lookup array of files
+            currently existing on the destination GCP bucket. Defaults to None.
 
     Returns
     -------
@@ -418,9 +442,15 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
         config['output_directory'], f"{folder_id}{config['video_extension']}"
         )
 
-    # Skip if output exists and reprocess is false
-    if not config['reprocess'] and os.path.exists(output_path):
-        log_payload += f"{os.path.basename(output_path)} exists and reprocess is set to False. Nothing to process. Skipping.\n"
+    # Check for local existence or GCP presence cache to determine skipping
+    already_uploaded = False
+    if config['gcp_upload'] and config['delete_local_after_upload']:
+        remote_filename = f"{folder_id}{config['video_extension']}"
+        if remote_inventory is not None and remote_filename in remote_inventory:
+            already_uploaded = True
+
+    if not config['reprocess'] and (os.path.exists(output_path) or already_uploaded):
+        log_payload += f"Deployment {folder_id} already exists locally or on GCP bucket directory. Skipping.\n"
         return {"status": "SKIP", "folder_id": folder_id, "reason": "Output video already exists", "log_payload": log_payload}
 
     # Skip and log any folder listed in the CSV that doesn't exist in the input
@@ -483,7 +513,7 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     for f in video_files:
         full_p = os.path.join(folder_path, f)
         
-        # SHIELDED LOOP METADATA PROBE: Intercept bad chapters and return structural context
+        # Intercept bad chapters and return structural context
         try:
             dur, source_fps, br, w, h = get_video_metadata(file_path=full_p, ffprobe_path=ffprobe_exe)
         except Exception as e:
@@ -536,6 +566,25 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
                 'bit_rate': data['bit_rate']
             })
         cumulative_time = file_end
+
+    # VIDEO DURATION CHECK
+    if config['skip_partial_videos']:
+        # Sum the actual calculated clip durations of the matched segments
+        total_clipped_seconds = sum(f_info['t'] for f_info in needed_files)
+        expected_seconds = pd_duration_seconds * time_scaling
+        
+        # Allow a small 2-second buffer for floating-point rounding across file seams
+        if total_clipped_seconds < (expected_seconds - 2.0):
+            log_payload += (
+                f"SKIP: {folder_id} - Truncated footage. Found only "
+                f"{total_clipped_seconds / 60:.2f} mins out of required {config['video_duration_minutes']} mins.\n"
+            )
+            return {
+                "status": "SKIP", 
+                "folder_id": folder_id, 
+                "reason": "Incomplete/Truncated footage duration inside window", 
+                "log_payload": log_payload
+            }
 
     # If no footage matches the 24-minute window, log and skip
     if not needed_files:
@@ -640,23 +689,73 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
 
     # Build execution command
     if config['use_gpu']:
+        # NVIDIA Hardware Accelerated (NVENC) Configuration:
+        #   -c:v h264_nvenc: Activates dedicated NVIDIA GPU hardware encoding
+        #       chips.
+        #   -rc vbr: Enforces Variable Bitrate control method to match
+        #       structural density adjustments.
         encoder_args = ["-c:v", "h264_nvenc", "-rc", "vbr"]
         if is_auto_mode:
+            # Automatic bitrate targeting matching source file structural
+            # characteristics:
+            #   -b:v: Dictates average overall targeted stream bitrate matching
+            #       the composite inputs.
+            #   -maxrate: Sets maximum allowable ceiling tolerance spike bounds
+            #       for complex frames.
+            #   -bufsize: Determines rate control calculation interval buffer
+            #       sizing window.
             encoder_args += ["-b:v", target_bitrate, "-maxrate", "100M", "-bufsize", "100M"]
         else:
+            # Constant Quality mode using hardware target scales:
+            #   -b:v 0: Instructs NVENC rate control to bypass traditional
+            #       explicit bitrate targets.
+            #   -cq: Sets absolute hardware constant quality level threshold
+            #       metric parameters.
             encoder_args += ["-b:v", "0", "-cq", str(config['quality_crf'])]
+        #   -preset p7: Employs highest quality multi-pass visual optimization
+        #       setting on NVIDIA chips.
         encoder_args += ["-preset", "p7"]
     else:
+        # Standard Software CPU (x264) Configuration:
+        #   -c:v libx264: Activates the industry-standard software H.264 video
+        #       compression library.
         encoder_args = ["-c:v", "libx264"]
         if is_auto_mode:
+            #   -b:v: Assigns calculated average destination bitrate
+            #       constraints to match density values.
             encoder_args += ["-b:v", target_bitrate]
         else:
+            #   -crf: Constant Rate Factor balancing subjective visual quality
+            #        metrics against size (lower is higher quality).
             encoder_args += ["-crf", str(config['quality_crf'])]
+        #   -preset medium: Provides optimized equilibrium balancing compute
+        #       time against compression output curves.
         encoder_args += ["-preset", "medium"]
     
     # Video duration for metadata
     final_metadata_t = pd_duration_seconds if raw_target != 'auto' else (pd_duration_seconds * time_scaling)
 
+    # See https://ffmpeg.org/ffmpeg.html for explicit sub-argument
+    # specifications:
+    #   -y: Overwrite matching existing target output files without prompting.
+    #   input_args: Dynamic sequence array containing absolute paths to
+    #       identified chapters (-i paths).
+    #   -filter_complex: Pass consolidated filtergraph string defining trim
+    #       offsets, seam stitches, and text.
+    #   -map: Instruct engine to route the final custom multi-stitched video
+    #       stream to the output.
+    #   -an: Strip all incoming audio layers (audio-less stream) to protect
+    #       processing density bounds.
+    #   encoder_args: Compression configuration settings designated for CPU
+    #       (libx264) or GPU hardware context.
+    #   -r: Force constant target frames per second metrics for tracking
+    #       compatibility parameters.
+    #   -fps_mode cfr: Force constant baseline frame mapping to override
+    #       hardware timing variances.
+    #   -video_track_timescale: Set custom navigation tickrate (30000) for
+    #       clean frame-seeking performance.
+    #   -t: Limit absolute tracking duration data to requested survey window
+    #       constraints.
     cmd = [
         ffmpeg_exe, "-y"
     ] + input_args + [
@@ -674,8 +773,8 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     # 7. EXECUTION WITH AUTO-RETRY LOOP
     result = MockResult()
     if process:
-        max_attempts = int(config.get('max_retries', 2)) + 1
-        timeout_val = int(config['timeout_minutes']) * 60 if config.get('timeout_minutes') else None
+        max_attempts = int(config['max_retries']) + 1
+        timeout_val = int(config['timeout_minutes']) * 60 if config['timeout_minutes'] else None
         
         for attempt in range(1, max_attempts + 1):
             try:
@@ -774,7 +873,7 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     upload_status = "PENDING"
     throughput_rate = "Unknown"
     
-    if config.get('gcp_upload') and process:
+    if config['gcp_upload'] and process:
         try:
             gcloud_exec = shutil.which("gcloud")
             cmd_up = [gcloud_exec, "storage", "cp", output_path, config['gcp_bucket_path']]
@@ -807,7 +906,7 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
                         break
                 
                 tqdm.write(f"  > {folder_id} uploaded to GCP at {throughput_rate}")
-                if config.get('delete_local_after_upload'):
+                if config['delete_local_after_upload']:
                     os.remove(output_path)
             else:
                 error_details = "".join(full_output)
@@ -855,6 +954,7 @@ def process_deployments(config_path: str = 'configurations.yml', process=True):
     config['time_buffer_minutes'] = config.get('time_buffer_minutes', -2)
     config['quality_crf'] = config.get('quality_crf', 'auto')
     config['reprocess'] = config.get('reprocess', False)
+    config['skip_partial_videos'] = config.get('skip_partial_videos', True)
     config['start_time_fps'] = config.get('start_time_fps', 30)
     config['timeout_minutes'] = config.get('timeout_minutes', 60)
     config['use_gpu'] = config.get('use_gpu', False)
@@ -886,19 +986,19 @@ def process_deployments(config_path: str = 'configurations.yml', process=True):
     os.makedirs(config['output_directory'], exist_ok=True)
     _, _, free = shutil.disk_usage(config['output_directory'])
     if free // (2**30) < config['min_gb_required']:
-        log_and_print(f"ERROR: Insufficient disk space ({free // (2**30)}GB remaining). Stopping.", config['log_file'])
+        print(f"\n[!] FATAL ERROR: Insufficient disk space ({free // (2**30)}GB remaining). Stopping.")
         return False
     
     # Confirm GCP bucket authentication
     if config['gcp_upload']:
         gcloud_exec = shutil.which("gcloud")
-        if 'gcp_bucket_path' not in config.keys():
+        if 'gcp_bucket_path' not in config:
             print("\nERROR: `gcp_upload` set to True but no GCP bucket was defined.")
             return False
         if not check_gcp_auth(bucket_path=config['gcp_bucket_path']):
             return False
 
-    # Start the log file
+    # Initialize the log file and write current configuration parameters
     mode = "w" if config['clear_log'] else "a"
     with open(config['log_file'], mode) as log:
         log.write(f"{'#'*80}\nSESSION START: {datetime.now()}\n")
@@ -907,6 +1007,25 @@ def process_deployments(config_path: str = 'configurations.yml', process=True):
             log.write(f"  -> {key}: {value}\n")
         log.write("\n")
         log.write(f"{'#'*80}\n\n")
+
+    # Initialize a standalone runtime state variable for our file lookup cache
+    remote_inventory = None
+
+    # Map bucket folder components once to protect worker pipelines
+    if config['gcp_upload'] and config['delete_local_after_upload']:
+        print("  > Mapping remote bucket directory to cache existing deployments...", flush=True)
+        ls_remote = subprocess.run(
+            [gcloud_exec, "storage", "ls", config['gcp_bucket_path']],
+            capture_output=True, text=True
+        )
+
+        remote_inventory_set = set()
+        if ls_remote.returncode == 0:
+            for line in ls_remote.stdout.splitlines():
+                filename = line.strip().split('/')[-1]
+                if filename:
+                    remote_inventory_set.add(filename)
+        remote_inventory = remote_inventory_set
 
     # Load and format CSV
     try:
@@ -934,11 +1053,10 @@ def process_deployments(config_path: str = 'configurations.yml', process=True):
     with ProcessPoolExecutor(max_workers=config['num_workers']) as executor:
         futures = {}
         for task_idx, row in enumerate(tasks, start=1):
-            task_pbar_pos = ((task_idx - 1) % config['num_workers']) + 1
             future = executor.submit(
                 process_single_deployment, 
                 row, config, ffmpeg_exe, ffprobe_exe, 
-                process, task_pbar_pos
+                process, remote_inventory
             )
             futures[future] = row
 
@@ -975,7 +1093,9 @@ def process_deployments(config_path: str = 'configurations.yml', process=True):
                 if missed_list:
                     missed_metrics[folder_id] = missed_list
 
-                if result.get('upload_status') and not result['upload_status'] == "SUCCESS":
+                # Cleanly collect upload statuses only when GCP routines are
+                # globally enabled
+                if config['gcp_upload'] and result.get('upload_status') and not result['upload_status'] == "SUCCESS":
                     failed_uploads.append(result['output_path'])
 
     pbar.close()
@@ -1013,12 +1133,17 @@ def process_deployments(config_path: str = 'configurations.yml', process=True):
         log.write(master_summary_str)
     print(master_summary_str)
 
-    # Retry any failed GCP uploads
-    if failed_uploads:
+    # Guard against dry runs, disabled uploads, and handle local cleanup
+    if process and config['gcp_upload'] and failed_uploads:
         gcloud_exec = shutil.which("gcloud")
         for path in failed_uploads:
             retry = subprocess.run([gcloud_exec, "storage", "cp", path, config['gcp_bucket_path']])
-            if retry.returncode != 0:
+            if retry.returncode == 0:
+                # If the recovery upload succeeded, check if we need to delete
+                # the local copy
+                if config['delete_local_after_upload'] and os.path.exists(path):
+                    os.remove(path)
+            else:
                 overall_success = False
 
     return (overall_success, os.path.basename(config['log_file']))
