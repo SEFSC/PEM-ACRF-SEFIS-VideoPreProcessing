@@ -576,13 +576,13 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
         # Allow a small 2-second buffer for floating-point rounding across file seams
         if total_clipped_seconds < (expected_seconds - 2.0):
             log_payload += (
-                f"SKIP: {folder_id} - Truncated footage. Found only "
+                f"SKIP: {folder_id} - Insufficient footage. Found only "
                 f"{total_clipped_seconds / 60:.2f} mins out of required {config['video_duration_minutes']} mins.\n"
             )
             return {
                 "status": "SKIP", 
                 "folder_id": folder_id, 
-                "reason": "Incomplete/Truncated footage duration inside window", 
+                "reason": "Insufficient video footage", 
                 "log_payload": log_payload
             }
 
