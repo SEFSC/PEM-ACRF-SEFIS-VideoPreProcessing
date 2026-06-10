@@ -46,9 +46,9 @@ ul.task-list li input[type="checkbox"] {
 <link href="../site_libs/quarto-html/quarto-syntax-highlighting-15634bcf2e68342d4ad2dfa704d543f6.css" rel="stylesheet" class="quarto-color-scheme-extra" id="quarto-text-highlighting-styles">
 <script src="../site_libs/bootstrap/bootstrap.min.js"></script>
 <link href="../site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
-<link href="../site_libs/bootstrap/bootstrap-a98fd9aef643011de3f2a1bc00e897c6.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme" id="quarto-bootstrap" data-mode="light">
-<link href="../site_libs/bootstrap/bootstrap-dark-b9703d2f19b071d4ee5c651abf4e01ca.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme quarto-color-alternate" id="quarto-bootstrap" data-mode="dark">
-<link href="../site_libs/bootstrap/bootstrap-a98fd9aef643011de3f2a1bc00e897c6.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme-extra" id="quarto-bootstrap" data-mode="light">
+<link href="../site_libs/bootstrap/bootstrap-105c35ad58e3f505ab953883175b6456.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme" id="quarto-bootstrap" data-mode="light">
+<link href="../site_libs/bootstrap/bootstrap-dark-7f9002ed9aae5dc1b29fd10c12f1002b.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme quarto-color-alternate" id="quarto-bootstrap" data-mode="dark">
+<link href="../site_libs/bootstrap/bootstrap-105c35ad58e3f505ab953883175b6456.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme-extra" id="quarto-bootstrap" data-mode="light">
 <script id="quarto-search-options" type="application/json">{
   "location": "navbar",
   "copy-button": false,
@@ -493,7 +493,8 @@ ul.task-list li input[type="checkbox"] {
 <ul>
 <li>Because video files can be quite large, the script verifies that there is enough disk space available in order to process the video without locking up the system. This can be set by the user (<code>min_gb_required</code>) but defaults to 10 GB.</li>
 <li>If the user chooses to upload the videos to a cloud bucket after creation, the script first confirms authentication to the specified bucket and will halt before processing any video if the check fails.</li>
-<li>Any videos that do not contain metadata in the CSV file are skipped and recorded in the log file. Similarly, if a timestamp is included in the CSV file but the corresponding video is not found, the video file will be noted in the log file. Neither scenario will crash the script.</li>
+<li>Any deployment included in the CSV file but with no corresponding video files is skipped and noted in the log file. Similarly, deployment videos that do not contain metadata in the CSV file are ignored altogether. Neither scenario will crash the script.</li>
+<li>By default, only deployments with enough observational video to create a stitched video of exactly <code>video_duration_minutes</code> minutes are processed. This avoids creating videos of insufficient length, as may happen if a deployment contains one or more corrupt video chapter.</li>
 <li>A log file is created to store all configuration settings for a given processing run as well as summary statistics of the output videos and any warnings or errors that may not trigger a full crash. If unexpected behavior is encountered, check the log file. This file can either be appended to or rewritten. <a href="../content/configuration.html">See the docs</a> for details.</li>
 </ul>
 

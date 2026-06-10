@@ -81,9 +81,9 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <link href="../site_libs/quarto-html/quarto-syntax-highlighting-15634bcf2e68342d4ad2dfa704d543f6.css" rel="stylesheet" class="quarto-color-scheme-extra" id="quarto-text-highlighting-styles">
 <script src="../site_libs/bootstrap/bootstrap.min.js"></script>
 <link href="../site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
-<link href="../site_libs/bootstrap/bootstrap-a98fd9aef643011de3f2a1bc00e897c6.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme" id="quarto-bootstrap" data-mode="light">
-<link href="../site_libs/bootstrap/bootstrap-dark-b9703d2f19b071d4ee5c651abf4e01ca.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme quarto-color-alternate" id="quarto-bootstrap" data-mode="dark">
-<link href="../site_libs/bootstrap/bootstrap-a98fd9aef643011de3f2a1bc00e897c6.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme-extra" id="quarto-bootstrap" data-mode="light">
+<link href="../site_libs/bootstrap/bootstrap-105c35ad58e3f505ab953883175b6456.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme" id="quarto-bootstrap" data-mode="light">
+<link href="../site_libs/bootstrap/bootstrap-dark-7f9002ed9aae5dc1b29fd10c12f1002b.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme quarto-color-alternate" id="quarto-bootstrap" data-mode="dark">
+<link href="../site_libs/bootstrap/bootstrap-105c35ad58e3f505ab953883175b6456.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme-extra" id="quarto-bootstrap" data-mode="light">
 <script id="quarto-search-options" type="application/json">{
   "location": "navbar",
   "copy-button": false,
@@ -587,28 +587,36 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <td style="text-align: left;">(str) Path to and name of the log file where processing information will be recorded. Defaults to <code>./processing-log.txt</code> (in the present working directory).</td>
 </tr>
 <tr class="odd">
+<td style="text-align: left;"><code>max_retries</code></td>
+<td style="text-align: left;">(int) Maximum number of times to try processing any given deployment. Set &gt;1 to combat potential timeouts. Defaults to 2.</td>
+</tr>
+<tr class="even">
 <td style="text-align: left;"><code>min_gb_required</code></td>
 <td style="text-align: left;">(int) Minimum required free disk space in GB to start processing. Script will warn if available space is below this threshold. Defaults to 10.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td style="text-align: left;"><code>num_workers</code></td>
 <td style="text-align: left;">(int) Number of workers to use for parallel processing, which corresponds (roughly) to the number of videos that can be processed simultaneously. The maximum value depends on system hardware, including CPU vs.&nbsp;GPU, and will be automatically adjusted down to the highest possible value (while leaving a buffer to support operating system functionality) if set higher than what is supported. Recommended values: 1 for older standard laptops, 8-12 for high-end laptops, 24-48 for high-performance computing (HPC) systems. Do not set as high as possible if you intend to use the machine for other purposes while the videos are being processed. Defaults to 1 (no parallel processing).</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td style="text-align: left;"><code>output_fps</code></td>
 <td style="text-align: left;">(int, float, or str) Desired frame rate (frames per second) of the output video. Set this to a number if a different frame is desired than that of the input videos, or to “auto” to match the frame rate of the input videos (default).</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td style="text-align: left;"><code>time_buffer_minutes</code></td>
 <td style="text-align: left;">(int) Number of whole minutes between the CSV reference timestamp and the start of the extracted video segment. Can be positive or negative. For example, set to a <em>positive</em> value if the timestamp indicates the time the trap hits the bottom or to a <em>negative</em> value if the timestamp indicates the video read time. Fractional minutes or <code>MM:SS</code> not yet supported. Defaults to -2.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td style="text-align: left;"><code>quality_crf</code></td>
 <td style="text-align: left;">(int or “auto”) Constant Rate Factor (CRF) for video encoding quality. Lower values mean better quality: 18 is high quality, 23 is standard. 10 with <code>use_gpu: false</code> or 11 with <code>use_gpu: true</code> produced bit rate and file size most similar to those of the original GoPro files during trial and error testing. Often machine (hardware) dependent. If <code>quality_crf: "auto"</code>, the input video bit rate will be used to dynamically calculate a target bitrate for the output video. Defaults to “auto”.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td style="text-align: left;"><code>reprocess</code></td>
 <td style="text-align: left;">(Boolean) If true, existing stitched videos of the same name will be overwritten. Otherwise, skips folders where the output file already exists. Defaults to false.</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;"><code>skip_partial_videos</code></td>
+<td style="text-align: left;">(Boolean) If true, any stitched video with duration less than <code>video_duration_minutes</code> will be skipped (i.e., NOT written to file) and logged. Defaults to True.</td>
 </tr>
 <tr class="odd">
 <td style="text-align: left;"><code>start_time_fps</code></td>
