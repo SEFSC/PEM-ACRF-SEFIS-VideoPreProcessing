@@ -1110,10 +1110,14 @@ def process_deployments(config_path: str = 'configurations.yml', process=True):
                 success_count += 1
                 t_flags = result.get('targets', {})
                 missed_list = []
-                if not t_flags.get('bpp_80'): missed_list.append("Missed 80% BPP target")
-                if not t_flags.get('size_80'): missed_list.append("Missed 80% file size target")
-                if not t_flags.get('bpp_90'): missed_list.append("Missed 90% BPP target")
-                if not t_flags.get('size_90'): missed_list.append("Missed 90% file size target")
+                if not t_flags.get('bpp_80'):
+                    missed_list.append("Missed 80% BPP target")
+                if not t_flags.get('size_80'):
+                    missed_list.append("Missed 80% file size target")
+                if not t_flags.get('bpp_90'):
+                    missed_list.append("Missed 90% BPP target")
+                if not t_flags.get('size_90'):
+                    missed_list.append("Missed 90% file size target")
                 
                 if missed_list:
                     missed_metrics[folder_id] = missed_list
