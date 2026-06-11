@@ -79,9 +79,12 @@ class MockResult:
     returncode = 0
     stderr = "Execution suppressed by --no-process"
 
-def validate_config(config: dict):
+def clean_and_validate_config(config: dict):
     """Checks for missing mandatory keys and typos in the YAML. Suggests the
-    closest-match valid key for any invalid key found.
+    closest-match valid key for any invalid key found. Cleans any string values
+    when Bools are expected, ensures video file extension, if passed, contains
+    a leading ".", and ensures the GCP bucket path, if passed, ends with a "/"
+    to ensure it is treated as a file prefix.
     
     Arguments
     ---------
@@ -134,6 +137,28 @@ def validate_config(config: dict):
         )
         raise ValueError(error_msg)
 
+    # Clean up Bool , if needed
+    BOOLEAN_KEYS = {
+        'clear_log', 'delete_local_after_upload', 'diagnostic_mode', 
+        'gcp_upload', 'reprocess', 'skip_partial_videos', 'use_gpu'
+    }
+    for key in BOOLEAN_KEYS:
+        if key in config and isinstance(config[key], str):
+            clean_val = config[key].strip().lower()
+            if clean_val in ('true', 'yes', 'on', '1'):
+                config[key] = True
+            elif clean_val in ('false', 'no', 'off', '0'):
+                config[key] = False
+    
+    # Ensure video extension always starts with a leading dot
+    if 'video_extension' in config and isinstance(config['video_extension'], str):
+        if not config['video_extension'].startswith('.'):
+            config['video_extension'] = '.' + config['video_extension']
+    
+    # Ensure GCP bucket ends with a "/" to be treated as a prefix
+    if config.get('gcp_upload', False) and 'gcp_bucket_path' in config:
+        config['gcp_bucket_path'] = config['gcp_bucket_path'].rstrip('/') + '/'
+
 def load_config(config_path: str = 'configurations.yml'):
     """
     Loads and verifies the YAML configuration file.
@@ -148,7 +173,7 @@ def load_config(config_path: str = 'configurations.yml'):
     """
     with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
-    validate_config(config=config)
+    clean_and_validate_config(config=config)
     return config
 
 def get_gpu_type():
