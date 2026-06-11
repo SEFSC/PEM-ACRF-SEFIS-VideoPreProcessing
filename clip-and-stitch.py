@@ -30,7 +30,7 @@ Required Dependencies:
 Author:  matt.grossi@noaa.gov with creation and refactoring assistance from
          Google Gemini Coding Partner
 Project: Southeast Fishery Independent Survey (SEFIS)
-Version: 2026.0.8
+Version: 2026.1.0
 Note:    Gemini Coding Partner was used to assist with developing this code.
          The code has been reviewed, edited, validated, and documented by NOAA
          Fisheries staff.
@@ -1129,7 +1129,7 @@ def process_deployments(config_path: str = 'configurations.yml', process=True):
 
     pbar.close()
 
-    # 3. UNIFIED FINAL LEDGER MASTER RECORD BLOCK
+    # 2. UNIFIED FINAL LEDGER MASTER RECORD BLOCK
     summary_lines = []
     summary_lines.append(f"\n{'='*80}\n{'FINAL BATCH PROCESSING EXECUTION SUMMARY REPORT':^80}\n{'='*80}")
     summary_lines.append(f"Successfully processed deployments: {success_count} / {len(tasks)}")
