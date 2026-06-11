@@ -296,14 +296,32 @@ def check_gcp_auth(bucket_path: str):
         print("\nERROR: 'gcloud' command not found. Is Google Cloud SDK installed and in your PATH?")
         return False
 
+    # Isolate the root bucket path (e.g., 'gs://bucket-name/') to separate auth from folder existence
+    match = re.match(r'^(gs://[^/]+)', bucket_path)
+    root_bucket = match.group(1) + '/' if match else bucket_path
+
     try:
-        # Check access using the resolved gcloud path
-        result = subprocess.run([gcloud_exec, "storage", "ls", bucket_path], capture_output=True, text=True)
+        # Verify system authentication and base bucket accessibility
+        root_result = subprocess.run([gcloud_exec, "storage", "ls", root_bucket], capture_output=True, text=True)
         
-        if result.returncode != 0:
-            print("\nERROR: GCP Authentication failed or bucket inaccessible.")
-            print(f"Details: {result.stderr.strip()}")
+        if root_result.returncode != 0:
+            print("\n[!] GCP AUTHENTICATION ERROR: Failed to connect to the cloud storage system.")
+            print("Please verify your gcloud authentication credentials, login status, or bucket permissions.")
+            print(f"Details: {root_result.stderr.strip()}")
             return False
+            
+        # If credentials are valid, verify if the explicit subfolder prefix exists
+        path_result = subprocess.run([gcloud_exec, "storage", "ls", bucket_path], capture_output=True, text=True)
+        
+        if path_result.returncode != 0:
+            print(f"\n[!] GCP CONFIGURATION ERROR: Target folder path does not exist.")
+            print(f"  -> Specified destination: {bucket_path}")
+            print("\nTo prevent configuration typos from cluttering the cloud bucket layout,")
+            print("this utility will not automatically initialize new directory prefixes.")
+            print("Please double-check your spelling in the YAML config file, or manually create")
+            print("the destination folder via the GCP Console or CLI before running this pipeline.")
+            return False
+            
         return True
         
     except Exception as e:
