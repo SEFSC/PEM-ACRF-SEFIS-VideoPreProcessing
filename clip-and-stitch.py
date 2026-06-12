@@ -314,7 +314,7 @@ def check_gcp_auth(bucket_path: str):
         path_result = subprocess.run([gcloud_exec, "storage", "ls", bucket_path], capture_output=True, text=True)
         
         if path_result.returncode != 0:
-            print(f"\n[!] GCP CONFIGURATION ERROR: Target folder path does not exist.")
+            print("\n[!] GCP CONFIGURATION ERROR: Target folder path does not exist.")
             print(f"  -> Specified destination: {bucket_path}")
             print("\nTo prevent configuration typos from cluttering the cloud bucket layout,")
             print("this utility will not automatically initialize new directory prefixes.")
@@ -921,29 +921,13 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
             gcloud_exec = shutil.which("gcloud")
             cmd_up = [gcloud_exec, "storage", "cp", output_path, config['gcp_bucket_path']]
             
-            process_up = subprocess.Popen(
-                cmd_up,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                bufsize=1,
-                universal_newlines=True
-            )
-
-            full_output = []
-            while True:
-                line = process_up.stderr.readline()
-                if not line and process_up.poll() is not None:
-                    break
-                if line:
-                    clean_line = line.strip()
-                    full_output.append(clean_line)
-
-            return_code = process_up.wait()
+            result_up = subprocess.run(cmd_up, capture_output=True, text=True)
             
-            if return_code == 0:
+            if result_up.returncode == 0:
                 upload_status = "SUCCESS"
-                for out_line in reversed(full_output):
+                
+                # Parse out the final throughput summary from the buffered stderr block
+                for out_line in reversed(result_up.stderr.splitlines()):
                     if "throughput" in out_line.lower():
                         throughput_rate = out_line.split(":")[-1].strip()
                         break
@@ -952,9 +936,8 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
                 if config['delete_local_after_upload']:
                     os.remove(output_path)
             else:
-                error_details = "".join(full_output)
-                upload_status = f"FAILED: {error_details}"
-                
+                upload_status = f"FAILED: {result_up.stderr.strip()}"                
+        
         except Exception as e:
             upload_status = f"FAILED: {str(e)}"
 
@@ -1093,57 +1076,79 @@ def process_deployments(config_path: str = 'configurations.yml', process=True):
     custom_format = "{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt}"
     pbar = tqdm(total=len(tasks), position=0, desc="Total Progress", bar_format=custom_format)
 
-    with ProcessPoolExecutor(max_workers=config['num_workers']) as executor:
-        futures = {}
-        for task_idx, row in enumerate(tasks, start=1):
-            future = executor.submit(
-                process_single_deployment, 
-                row, config, ffmpeg_exe, ffprobe_exe, 
-                process, remote_inventory
-            )
-            futures[future] = row
+    try:
+        with ProcessPoolExecutor(max_workers=config['num_workers']) as executor:
+            futures = {}
+            for task_idx, row in enumerate(tasks, start=1):
+                future = executor.submit(
+                    process_single_deployment, 
+                    row, config, ffmpeg_exe, ffprobe_exe, 
+                    process, remote_inventory
+                )
+                futures[future] = row
 
-        for future in as_completed(futures):
-            result = future.result()
-            pbar.update(1)
-            folder_id = result['folder_id']
-            
-            # Write log
-            if result.get('log_payload'):
-                with open(config['log_file'], "a") as log:
-                    log.write(result['log_payload'])
-            
-            # Non-blocking collection of worker process hard termination errors
-            if result['status'] == "ERROR":
-                err_type = result.get('error_type', 'Unclassified Functional Error')
-                err_msg = result.get('error_msg', 'No trace log strings provided.')
-                errors_by_type[err_type].append(f"{folder_id} -> {err_msg}")
-                overall_success = False
+            for future in as_completed(futures):
+                result = future.result()
+                pbar.update(1)
+                folder_id = result['folder_id']
                 
-            elif result['status'] == "SKIP":
-                reason = result.get('reason', 'Skipped')
-                skipped_deployments[reason].append(folder_id)
+                # Write log
+                if result.get('log_payload'):
+                    with open(config['log_file'], "a") as log:
+                        log.write(result['log_payload'])
                 
-            elif result['status'] == "SUCCESS":
-                success_count += 1
-                t_flags = result.get('targets', {})
-                missed_list = []
-                if not t_flags.get('bpp_80'):
-                    missed_list.append("Missed 80% BPP target")
-                if not t_flags.get('size_80'):
-                    missed_list.append("Missed 80% file size target")
-                if not t_flags.get('bpp_90'):
-                    missed_list.append("Missed 90% BPP target")
-                if not t_flags.get('size_90'):
-                    missed_list.append("Missed 90% file size target")
-                
-                if missed_list:
-                    missed_metrics[folder_id] = missed_list
+                # Non-blocking collection of worker process hard termination errors
+                if result['status'] == "ERROR":
+                    err_type = result.get('error_type', 'Unclassified Functional Error')
+                    err_msg = result.get('error_msg', 'No trace log strings provided.')
+                    errors_by_type[err_type].append(f"{folder_id} -> {err_msg}")
+                    overall_success = False
+                    
+                elif result['status'] == "SKIP":
+                    reason = result.get('reason', 'Skipped')
+                    skipped_deployments[reason].append(folder_id)
+                    
+                elif result['status'] == "SUCCESS":
+                    success_count += 1
+                    t_flags = result.get('targets', {})
+                    missed_list = []
+                    if not t_flags.get('bpp_80'):
+                        missed_list.append("Missed 80% BPP target")
+                    if not t_flags.get('size_80'):
+                        missed_list.append("Missed 80% file size target")
+                    if not t_flags.get('bpp_90'):
+                        missed_list.append("Missed 90% BPP target")
+                    if not t_flags.get('size_90'):
+                        missed_list.append("Missed 90% file size target")
+                    
+                    if missed_list:
+                        missed_metrics[folder_id] = missed_list
 
-                # Cleanly collect upload statuses only when GCP routines are
-                # globally enabled
-                if config['gcp_upload'] and result.get('upload_status') and not result['upload_status'] == "SUCCESS":
-                    failed_uploads.append(result['output_path'])
+                    # Cleanly collect upload statuses only when GCP routines are
+                    # globally enabled
+                    if config['gcp_upload'] and result.get('upload_status') and not result['upload_status'] == "SUCCESS":
+                        failed_uploads.append(result['output_path'])
+    
+    except KeyboardInterrupt:
+        # CONCURRENT PROCESS TREE CLEANUP GUARD
+        print("\n\n[!] USER ABORT DETECTED: Killing all video processing and cloud upload channels immediately...")
+        pbar.close()
+        
+        # Prevent remaining queued items from running and clear the pipeline pool
+        executor.shutdown(wait=False, cancel_futures=True)
+        
+        # Execute a platform-specific tree-nuke to ensure no orphan background FFmpeg processes leak
+        if sys.platform.startswith("win"):
+            # Windows: Forcefully terminate the process tree (/T) matching this script's PID
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(os.getpid())], capture_output=True)
+        else:
+            # Mac/Linux: Signal the entire process group hierarchy to terminate instantly
+            import signal
+            try:
+                os.killpg(os.getpgrp(), signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        sys.exit(1)
 
     pbar.close()
 
