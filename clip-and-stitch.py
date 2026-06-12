@@ -443,6 +443,13 @@ def get_gopro_sort_key(filename: str):
         return (int(rec_id), int(chapter))
     return (0, 0)
 
+def init_worker():
+    """Initializer for child pool workers to ignore SIGINT (Ctrl+C),
+    ensuring the master parent thread retains absolute control over shutdowns.
+    """
+    import signal
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+
 # =============================================================================
 # WORKER TASK: PROCESS SINGLE DEPLOYMENT
 # =============================================================================
@@ -1102,7 +1109,7 @@ def process_deployments(config_path: str = 'configurations.yml', process=True):
     skipped_deployments = defaultdict(list)
     success_count = 0
 
-    # Total progress bar
+# Total progress bar
     custom_format = "{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{postfix}]"
     pbar = tqdm(total=len(tasks), position=0, desc="Total Progress", bar_format=custom_format)
     pbar.set_postfix_str("Avg Upload: N/A")
@@ -1111,7 +1118,8 @@ def process_deployments(config_path: str = 'configurations.yml', process=True):
     successful_upload_speeds = []
 
     try:
-        with ProcessPoolExecutor(max_workers=config['num_workers']) as executor:
+        # Added the initializer parameter to shield workers from signal absorption
+        with ProcessPoolExecutor(max_workers=config['num_workers'], initializer=init_worker) as executor:
             futures = {}
             for task_idx, row in enumerate(tasks, start=1):
                 future = executor.submit(
@@ -1120,7 +1128,6 @@ def process_deployments(config_path: str = 'configurations.yml', process=True):
                     process, remote_inventory
                 )
                 futures[future] = row
-
             for future in as_completed(futures):
                 result = future.result()
                 
