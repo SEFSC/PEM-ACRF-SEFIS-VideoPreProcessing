@@ -466,6 +466,9 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     (dict) Dictionary containing processed folder name and processing status.
             Example: {"status": "SUCCESS", "folder_id": "T60253001_A", ...}
     """
+    # Initialize high-performance thread-isolated print registry array
+    console_msgs = []
+
     # Start timer for this video for diagnostic mode
     if config['diagnostic_mode']:
         iter_start = time.perf_counter()
@@ -479,7 +482,7 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     folder_path = os.path.join(config['input_directory'], folder_id)
     if not os.path.exists(folder_path):
         log_payload += f"SKIP: Folder {folder_path} not found.\n"
-        return {"status": "SKIP", "folder_id": folder_id, "reason": "Video folder path not found", "log_payload": log_payload}
+        return {"status": "SKIP", "folder_id": folder_id, "reason": "Video folder path not found", "log_payload": log_payload, "console_msgs": console_msgs}
         
     output_path = os.path.join(
         config['output_directory'], f"{folder_id}{config['video_extension']}"
@@ -494,20 +497,20 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
 
     if not config['reprocess'] and (os.path.exists(output_path) or already_uploaded):
         log_payload += f"Deployment {folder_id} already exists locally or on GCP bucket directory. Skipping.\n"
-        return {"status": "SKIP", "folder_id": folder_id, "reason": "Output video already exists", "log_payload": log_payload}
+        return {"status": "SKIP", "folder_id": folder_id, "reason": "Output video already exists", "log_payload": log_payload, "console_msgs": console_msgs}
 
     # Skip and log any folder listed in the CSV that doesn't exist in the input
     # directory
     if not os.path.exists(folder_path):
         log_payload += f"SKIP: Folder {folder_id} not found.\n"
-        return {"status": "SKIP", "folder_id": folder_id, "reason": "Folder path not found", "log_payload": log_payload}
+        return {"status": "SKIP", "folder_id": folder_id, "reason": "Folder path not found", "log_payload": log_payload, "console_msgs": console_msgs}
 
     # 3. GATHER & SORT FILES
     video_files = [f for f in os.listdir(folder_path) 
                     if f.upper().endswith(config['video_extension'].upper())]
     if not video_files:
         log_payload += f"SKIP: No videos in {folder_id}.\n"
-        return {"status": "SKIP", "folder_id": folder_id, "reason": "No matched video extension files inside directory", "log_payload": log_payload}
+        return {"status": "SKIP", "folder_id": folder_id, "reason": "No matched video extension files inside directory", "log_payload": log_payload, "console_msgs": console_msgs}
     video_files.sort(key=get_gopro_sort_key)
 
     # 4. CALCULATE TIMELINE
@@ -524,7 +527,8 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
             "folder_id": folder_id,
             "error_type": "Metadata Corruption (FFprobe Failure)",
             "error_msg": f"Failed to parse initial file structure for '{os.path.basename(first_file_path)}'. Underlying crash: {type(e).__name__}: {str(e)}",
-            "log_payload": log_payload
+            "log_payload": log_payload,
+            "console_msgs": console_msgs
         }
 
     start_time_fps = float(config['start_time_fps'])
@@ -551,7 +555,7 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
 
     # Extract video metadata
     if config['diagnostic_mode']:
-        tqdm.write(f"  > Probing metadata for {len(video_files)} video chapters in {folder_id}...")
+        console_msgs.append(f"  > Probing metadata for {len(video_files)} video chapters in {folder_id}...")
     file_data = []
     for f in video_files:
         full_p = os.path.join(folder_path, f)
@@ -566,7 +570,8 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
                 "folder_id": folder_id,
                 "error_type": "Metadata Corruption (FFprobe Failure)",
                 "error_msg": f"Failed to parse intermediate chapter file components for '{f}'. Structural data is likely missing or corrupt. Underlying crash: {type(e).__name__}: {str(e)}",
-                "log_payload": log_payload
+                "log_payload": log_payload,
+                "console_msgs": console_msgs
             }
 
         file_data.append({
@@ -581,7 +586,7 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     # Check the start times and durations of each video to determine which
     # files are needed to stitch together and where to clip partial videos
     if config['diagnostic_mode']:
-        tqdm.write("  > Determining needed files and trim points...")
+        console_msgs.append("  > Determining needed files and trim points...")
     cumulative_time = 0
     needed_files = []
     for data in file_data:
@@ -626,13 +631,14 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
                 "status": "SKIP", 
                 "folder_id": folder_id, 
                 "reason": "Insufficient video footage", 
-                "log_payload": log_payload
+                "log_payload": log_payload,
+                "console_msgs": console_msgs
             }
 
     # If no footage matches the 24-minute window, log and skip
     if not needed_files:
         log_payload += f"SKIP: {folder_id} - No footage found for the requested time window.\n"
-        return {"status": "SKIP", "folder_id": folder_id, "reason": "No overlapping footage found within clipping window", "log_payload": log_payload}
+        return {"status": "SKIP", "folder_id": folder_id, "reason": "No overlapping footage found within clipping window", "log_payload": log_payload, "console_msgs": console_msgs}
 
     # 5. CLIP AND STITCH
     # See https://ffmpeg.org/ffmpeg.html
@@ -649,19 +655,24 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
         # Trim the video using start time and duration (seconds) and reset the
         # clock of the trimmed segment (`setpts`) to 0 so the stitcher sees a
         # clean sequence starting from 0.0s
-        trim_label = f"[v{i}]"
+        v_label = f"[v{i}]"
+        a_label = f"[a{i}]"
         filter_complex_parts.append(
             f"[{i}:v]trim=start={f_info['ss']}:duration={f_info['t']},"
-            f"setpts=PTS-STARTPTS{trim_label}"
+            f"setpts=PTS-STARTPTS{v_label}"
         )
-        filter_inputs += trim_label
+        filter_complex_parts.append(
+            f"[{i}:a]atrim=start={f_info['ss']}:duration={f_info['t']},"
+            f"asetpts=PTS-STARTPTS{a_label}"
+        )
+        filter_inputs += f"{v_label}{a_label}"
 
     # Target bitrate based on original GoPro metadata to ensure visual
     # fidelity
     target_bitrate = f"{int(cumulative_size * 8 / (pd_duration_seconds * time_scaling))}"
     is_auto_mode = str(config['quality_crf']).lower() == 'auto'
     if is_auto_mode and config['diagnostic_mode']:
-        tqdm.write(f"  > Targeting bitrate {int(target_bitrate)/1_000_000:.2f} Mbps to match source density.")
+        console_msgs.append(f"  > Targeting bitrate {int(target_bitrate)/1_000_000:.2f} Mbps to match source density.")
 
     # Build the filter string: e.g., `[0:v][1:v]concat=n=2:v=1[outv]`:
     fps_logic = f"fps=fps={output_fps}:round=near"
@@ -669,10 +680,10 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
         fps_logic += f",setpts=N/({output_fps}*TB)"
 
     concat_part = (
-        f"{filter_inputs}concat=n={len(needed_files)}:v=1,"
-        f"{fps_logic}[outv]"
+        f"{filter_inputs}concat=n={len(needed_files)}:v=1:a=1[v_stitched][outa]"
     )
     filter_complex_parts.append(concat_part)
+    filter_complex_parts.append(f"[v_stitched]{fps_logic}[outv]")
     maparg = "[outv]"
 
     # Join all filter parts with semicolons
@@ -728,7 +739,7 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     _, _, worker_free = shutil.disk_usage(config['output_directory'])
     if (worker_free // (2**30)) < config['min_gb_required'] and process:
         log_payload += f"SKIP: {folder_id} - Disk space critical ({worker_free // (2**30)}GB left).\n"
-        return {"status": "SKIP", "folder_id": folder_id, "reason": "Disk space safety constraints tripped", "log_payload": log_payload}
+        return {"status": "SKIP", "folder_id": folder_id, "reason": "Disk space safety constraints tripped", "log_payload": log_payload, "console_msgs": console_msgs}
 
     # Build execution command
     if config['use_gpu']:
@@ -787,10 +798,10 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     #       offsets, seam stitches, and text.
     #   -map: Instruct engine to route the final custom multi-stitched video
     #       stream to the output.
-    #   -an: Strip all incoming audio layers (audio-less stream) to protect
-    #       processing density bounds.
+    #   -map [outa]: Route the synchronized and stitched audio stream to the output file container.
     #   encoder_args: Compression configuration settings designated for CPU
     #       (libx264) or GPU hardware context.
+    #   -c:a aac: Specify the Advanced Audio Coding (AAC) codec for the stitched audio stream tracking.
     #   -r: Force constant target frames per second metrics for tracking
     #       compatibility parameters.
     #   -fps_mode cfr: Force constant baseline frame mapping to override
@@ -804,8 +815,9 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     ] + input_args + [
         "-filter_complex", filter_str,
         "-map", maparg,
-        "-an"
+        "-map", "[outa]"
     ] + encoder_args + [
+        "-c:a", "aac",
         "-r", str(output_fps),
         "-fps_mode", "cfr",
         "-video_track_timescale", "30000",
@@ -831,7 +843,8 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
                         "folder_id": folder_id, 
                         "error_type": "FFmpeg Timeout", 
                         "error_msg": f"Execution halted after timing out consistently across {max_attempts} distinct attempts.",
-                        "log_payload": log_payload
+                        "log_payload": log_payload,
+                        "console_msgs": console_msgs
                     }
                 time.sleep(5) 
                 continue
@@ -843,7 +856,8 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
                 "folder_id": folder_id, 
                 "error_type": "FFmpeg Fatal Exit Code", 
                 "error_msg": result.stderr.strip().split('\n')[-1],
-                "log_payload": log_payload
+                "log_payload": log_payload,
+                "console_msgs": console_msgs
             }
     
     # Calculate actual metrics for the final video
@@ -868,11 +882,11 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     if config['diagnostic_mode']:
         iter_duration = time.perf_counter() - iter_start
         if iter_duration > 60:
-            tqdm.write(f"  > Created {folder_id}{config['video_extension']} in {iter_duration/60:.2f} minutes.\n")
+            console_msgs.append(f"  > Created {folder_id}{config['video_extension']} in {iter_duration/60:.2f} minutes.\n")
         else:
-            tqdm.write(f"  > Created {folder_id}{config['video_extension']} in {iter_duration:.2f} seconds.\n")
-        tqdm.write("    Output file metrics versus expectations:\n")
-        tqdm.write(expectations_table_str)
+            console_msgs.append(f"  > Created {folder_id}{config['video_extension']} in {iter_duration:.2f} seconds.\n")
+        console_msgs.append("    Output file metrics versus expectations:\n")
+        console_msgs.append(expectations_table_str)
 
     # Check expectations
     is_bpp_ideal_80 = avg_bpp_src * 0.80 <= actual_bpp <= avg_bpp_src * 1.20
@@ -915,7 +929,9 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     # GCP high-speed pipeline upload block
     upload_status = "PENDING"
     throughput_rate = "Unknown"
-    
+    console_msg = ""
+    upload_speed_mibs = 0.0  # Initialize a raw float tracking variable
+
     if config['gcp_upload'] and process:
         try:
             gcloud_exec = shutil.which("gcloud")
@@ -930,9 +946,21 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
                 for out_line in reversed(result_up.stderr.splitlines()):
                     if "throughput" in out_line.lower():
                         throughput_rate = out_line.split(":")[-1].strip()
+                        
+                        # Extract the numeric float value and normalize units for the average calculation
+                        spd_match = re.search(r'([0-9.]+)\s*([a-zA-Z/]+)', throughput_rate)
+                        if spd_match:
+                            val = float(spd_match.group(1))
+                            unit = spd_match.group(2).lower()
+                            if 'k' in unit:
+                                upload_speed_mibs = val / 1024.0  # Normalize KiB to MiB
+                            elif 'b' in unit and 'm' not in unit:
+                                upload_speed_mibs = val / (1024.0 * 1024.0)  # Normalize Bytes to MiB
+                            else:
+                                upload_speed_mibs = val  # Already MiB/s or MB/s
                         break
                 
-                tqdm.write(f"  > {folder_id} uploaded to GCP at {throughput_rate}")
+                console_msg = f"  > {folder_id} uploaded to GCP at {throughput_rate}"
                 if config['delete_local_after_upload']:
                     os.remove(output_path)
             else:
@@ -944,7 +972,7 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     if result.returncode == 0:
         log_payload += full_table_str
         if config['diagnostic_mode']:
-            tqdm.write(full_table_str)
+            console_msgs.append(full_table_str)
 
     # Return the entire un-clipped string package smoothly to the parent thread
     return {
@@ -956,7 +984,9 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
             "bpp_80": is_bpp_ideal_80, "size_80": is_size_ideal_80,
             "bpp_90": is_bpp_ideal_90, "size_90": is_size_ideal_90
         },
-        "log_payload": log_payload
+        "log_payload": log_payload,
+        "console_msgs": console_msgs,
+        "upload_speed": upload_speed_mibs
     }
 
 # =============================================================================
@@ -1073,8 +1103,12 @@ def process_deployments(config_path: str = 'configurations.yml', process=True):
     success_count = 0
 
     # Total progress bar
-    custom_format = "{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt}"
+    custom_format = "{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{postfix}]"
     pbar = tqdm(total=len(tasks), position=0, desc="Total Progress", bar_format=custom_format)
+    pbar.set_postfix_str("Avg Upload: N/A")
+
+    # Initialize a list to hold successful network metrics across parallel returns
+    successful_upload_speeds = []
 
     try:
         with ProcessPoolExecutor(max_workers=config['num_workers']) as executor:
@@ -1089,8 +1123,20 @@ def process_deployments(config_path: str = 'configurations.yml', process=True):
 
             for future in as_completed(futures):
                 result = future.result()
+                
+                # Write any console outputs safely through the parent process tqdm wrapper
+                if result.get('console_msgs'):
+                    for msg in result['console_msgs']:
+                        tqdm.write(msg)
+                        
                 pbar.update(1)
                 folder_id = result['folder_id']
+                
+                # Dynamic performance evaluation updates
+                if result.get('upload_speed') and result['upload_speed'] > 0:
+                    successful_upload_speeds.append(result['upload_speed'])
+                    running_avg = sum(successful_upload_speeds) / len(successful_upload_speeds)
+                    pbar.set_postfix_str(f"Avg Upload: {running_avg:.1f} MiB/s")
                 
                 # Write log
                 if result.get('log_payload'):
