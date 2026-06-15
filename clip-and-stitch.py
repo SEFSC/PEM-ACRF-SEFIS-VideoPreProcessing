@@ -1120,8 +1120,8 @@ def process_deployments(config_path: str = 'configurations.yml', process=True):
 
     if missed_metrics:
         summary_lines.append(f"\n{'-'*10} QUALITY THRESHOLD (80% / 90%) MISSES {'-'*10}")
-        for _, (f_id, faults) in enumerate(missed_metrics.items(), start=1):
-            summary_lines.append(f"  -> Deployment {f_id}: {', '.join(faults)}")
+        for idx, (f_id, faults) in enumerate(missed_metrics.items(), start=1):
+            summary_lines.append(f"  {idx}. Deployment {f_id}: {', '.join(str(x) for x in faults)}")
 
     # Assemble and log report
     master_summary_str = "\n".join(summary_lines)
@@ -1134,7 +1134,7 @@ def process_deployments(config_path: str = 'configurations.yml', process=True):
     process_duration = time.perf_counter() - process_start
     if process_duration > (60 * 60):
         process_msg = f"  Processed {success_count} deployments in {process_duration/60/60:.2f} hours.\n"
-    if process_duration > 60:
+    elif process_duration > 60:
         process_msg = f"  Processed {success_count} deployments in {process_duration/60:.2f} minutes.\n"
     else:
         process_msg = f"  Processed {success_count} deployments in {process_duration:.2f} seconds.\n"
@@ -1198,7 +1198,7 @@ def process_deployments(config_path: str = 'configurations.yml', process=True):
         upload_duration = time.perf_counter() - upload_timer
         if upload_duration > (60 * 60):
             upload_msg = f"  Uploaded {len(upload_queue)} videos in {upload_duration/60/60:.2f} hours.\n"
-        if upload_duration > 60:
+        elif upload_duration > 60:
             upload_msg = f"  Uploaded {len(upload_queue)} videos in {upload_duration/60:.2f} minutes.\n"
         else:
             upload_msg = f"  Uploaded {len(upload_queue)} videos in {upload_duration:.2f} seconds.\n"
@@ -1226,7 +1226,7 @@ if __name__ == "__main__":
     script_duration = time.perf_counter() - script_start
     if script_duration > (60 * 60):
         runtime = f"{script_duration/60/60:.2f} hours"
-    if script_duration > 60:
+    elif script_duration > 60:
         runtime = f"{script_duration/60:.2f} minutes"
     else:
         runtime = f"{script_duration:.2f} seconds"
