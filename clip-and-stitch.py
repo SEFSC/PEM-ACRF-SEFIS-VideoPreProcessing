@@ -267,17 +267,17 @@ def calculate_file_size(duration: float | int, bit_rate: float | int) -> int:
     """
     return int((duration * bit_rate) / 8)
 
-def log_and_print(message: str, log_path: str, indent_spaces: int = 4):
+def log_and_print(message: str, log_path: str, indent_spaces: int = 0):
     """Indents and writes a message to both console and log.
     
     Arguments
     ---------
     message (str): message to print and write to log file
     log_path (str): file path to log file to populate
-    indent (int): number spaces to indent message. Defaults to 4.
+    indent (int): number spaces to indent message. Defaults to 0.
     """
     indent = " " * indent_spaces
-    clean_msg = textwrap.indent(textwrap.dedent(message).strip(), indent)
+    clean_msg = textwrap.indent(textwrap.dedent(message), indent)
     tqdm.write(clean_msg + "\n")
     with open(log_path, "a") as log:
         log.write(clean_msg)
@@ -343,18 +343,18 @@ def get_ffmpeg_command(config: dict, tool: Literal["ffmpeg", "ffprobe"] = "ffmpe
     extension = ".exe" if sys.platform.startswith("win") else ""
     executable_name = f"{tool}{extension}"
 
-    # 1. Check local folder created by setup
+    # Check local folder created by setup
     local_path = os.path.join(os.getcwd(), "ffmpeg", "bin", executable_name)
     if os.path.exists(local_path):
         return local_path
         
-    # 2. Fallback to config file
+    # Fallback to config file
     config_key = f"{tool}_path"
     config_val = config[config_key]
     if config_val and os.path.exists(config_val):
         return config_val
         
-    # 3. Last resort: assume it is in the system PATH
+    # Last resort: assume it is in the system PATH
     return tool
 
 def time_ceiling(time_str: str) -> str:
@@ -509,7 +509,7 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
         log_payload += f"SKIP: Folder {folder_id} not found.\n"
         return {"status": "SKIP", "folder_id": folder_id, "reason": "Folder path not found", "log_payload": log_payload}
 
-    # 3. GATHER & SORT FILES
+    # Gather and sort files
     video_files = [f for f in os.listdir(folder_path) 
                     if f.upper().endswith(config['video_extension'].upper())]
     if not video_files:
@@ -517,7 +517,7 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
         return {"status": "SKIP", "folder_id": folder_id, "reason": "No matched video extension files inside directory", "log_payload": log_payload}
     video_files.sort(key=get_gopro_sort_key)
 
-    # 4. CALCULATE TIMELINE
+    # CALCULATE TIMELINE
     # Resolve frame rates (`source_fps` will come from video metadata)
     first_file_path = os.path.join(folder_path, video_files[0])
     
@@ -641,7 +641,7 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
         log_payload += f"SKIP: {folder_id} - No footage found for the requested time window.\n"
         return {"status": "SKIP", "folder_id": folder_id, "reason": "No overlapping footage found within clipping window", "log_payload": log_payload}
 
-    # 5. CLIP AND STITCH
+    # CLIP AND STITCH
     # See https://ffmpeg.org/ffmpeg.html
     cumulative_size = 0
     cumulative_bpp = 0
@@ -663,8 +663,7 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
         )
         filter_inputs += trim_label
 
-    # Target bitrate based on original GoPro metadata to ensure visual
-    # fidelity
+    # Target bitrate based on original GoPro metadata to ensure visual fidelity
     target_bitrate = f"{int(cumulative_size * 8 / (pd_duration_seconds * time_scaling))}"
     is_auto_mode = str(config['quality_crf']).lower() == 'auto'
     if is_auto_mode and config['diagnostic_mode']:
@@ -685,7 +684,7 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     # Join all filter parts with semicolons
     filter_str = "; ".join(filter_complex_parts)
 
-    # 6. GENERATE QC TABLE
+    # GENERATE QC TABLE
     cumulative_output_frames = 0
     target_total_frames = int(pd_duration_seconds * start_time_fps)
     table_lines = []
@@ -701,7 +700,8 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
         source_start = seconds_to_timestamp(report_ss / time_scaling, start_time_fps)
         table_lines.append(f"{start_ts:<18} | START SEGMENT     | {os.path.basename(segment['path']):<17} | {source_start}")
         
-        # Calculate discrete frames for THIS segment by removing the nudge from the count
+        # Calculate discrete frames for this segment by removing the nudge from
+        # the count
         actual_t = segment['t'] - (nudge * time_scaling if i == 0 else 0)
         segment_frames = int(round(actual_t * segment['fps']))
         
@@ -785,8 +785,7 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     # Video duration for metadata
     final_metadata_t = pd_duration_seconds if raw_target != 'auto' else (pd_duration_seconds * time_scaling)
 
-    # See https://ffmpeg.org/ffmpeg.html for explicit sub-argument
-    # specifications:
+    # See https://ffmpeg.org/ffmpeg.html for explicit argument specifications:
     #   -y: Overwrite matching existing target output files without prompting.
     #   input_args: Dynamic sequence array containing absolute paths to
     #       identified chapters (-i paths).
@@ -820,7 +819,7 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
         output_path
     ]
 
-    # 7. EXECUTION WITH AUTO-RETRY LOOP
+    # EXECUTION WITH AUTO-RETRY LOOP
     result = MockResult()
     if process:
         max_attempts = int(config['max_retries']) + 1
@@ -892,7 +891,7 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     log_payload += f"    Estimated output video size without visual quality loss: {cumulative_size / (2**30):.2f} GB\n"
     log_payload += f"    Estimated target bitrate to maintain visual fidelity: {int(target_bitrate)/1_000_000:.2f} Mbps\n"
     log_payload += f"    Average information density of original videos: {avg_bpp_src:.4f} bits per pixel (BPP)\n"
-    log_payload += ' '*30 + '* '*10 + '\n\n'
+    log_payload += ' '*30 + '* '*10 + '\n'
     log_payload += f"    Output video file size: {actual_size / (2**30):.2f} GB\n"
     log_payload += f"    Output video bitrate:   {actual_bitrate/1_000_000:.2f} Mbps\n"
     log_payload += f"    Information density:    {actual_bpp:.4f} BPP\n\n"
@@ -900,24 +899,6 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     log_payload += f"    -> Within 80% of estimated file size:   {'YES' if is_size_ideal_80 else 'NO  X'}\n"
     log_payload += f"    -> Within 90% of original average BPP:  {'YES' if is_bpp_ideal_90 else 'NO  X'}\n"
     log_payload += f"    -> Within 90% of estimated file size:   {'YES' if is_size_ideal_90 else 'NO  X'}\n"
-
-    # Centralized multi-line notes and warnings
-    quality_note = ""
-    warning_90 = """
-        WARNING: Output video is NOT within 90% of the original BPP and/or file
-                 size. Output may be too small (quality loss) or too large (wasted
-                 space).
-    """
-    warning_80 = """
-        WARNING: Output video is NOT within 80% of the original BPP and/or file
-                 size. Output may be too small (quality loss) or too large (wasted
-                 space).
-    """
-
-    if not all([is_bpp_ideal_90, is_size_ideal_90]):
-        log_payload += f"{warning_90}\n{quality_note}\n"
-    elif not all([is_bpp_ideal_80, is_size_ideal_80]):
-        log_payload += f"{warning_80}\n{quality_note}\n"
 
     if result.returncode == 0:
         log_payload += full_table_str
@@ -985,7 +966,7 @@ def process_deployments(config_path: str = 'configurations.yml', process=True):
         if config['num_workers'] > max_allowed:
             print(f"  > NOTICE: num_workers ({config['num_workers']}) exceeds hardware limit ({max_cpu}). Capping at {max_allowed}.", flush=True)
 
-    # 1. SETUP & VALIDATION
+    # SETUP & VALIDATION
     # Verify there is enough disk space to continue without locking up system
     os.makedirs(config['output_directory'], exist_ok=True)
     _, _, free = shutil.disk_usage(config['output_directory'])
@@ -1022,7 +1003,6 @@ def process_deployments(config_path: str = 'configurations.yml', process=True):
             [gcloud_exec, "storage", "ls", config['gcp_bucket_path']],
             capture_output=True, text=True
         )
-
         remote_inventory_set = set()
         if ls_remote.returncode == 0:
             for line in ls_remote.stdout.splitlines():
@@ -1051,14 +1031,14 @@ def process_deployments(config_path: str = 'configurations.yml', process=True):
     success_count = 0
 
     # Total progress bar setup for Phase 1
-    BASE_FORMAT = "{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt}"
-    pbar = tqdm(total=len(tasks), position=0, desc="Encoding Video", bar_format=BASE_FORMAT)
+    bar_format = "{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt}"
+    pbar = tqdm(total=len(tasks), position=0, desc="Encoding Video", bar_format=bar_format)
 
-    # Initialize a tracking array to hold successful file paths for the secondary upload phase
-    upload_queue = []
-
+    # Initialize a tracking array to hold successful file paths for the
+    # secondary upload phase
     from concurrent.futures import wait, FIRST_COMPLETED
-    
+
+    upload_queue = []
     with ProcessPoolExecutor(max_workers=config['num_workers'], initializer=init_worker) as executor:
         futures_map = {}
         for row in tasks:
@@ -1117,15 +1097,17 @@ def process_deployments(config_path: str = 'configurations.yml', process=True):
 
     pbar.close()
 
-    # 2. UNIFIED FINAL LEDGER MASTER RECORD BLOCK
+    # Status summary
     summary_lines = []
     summary_lines.append(f"\n{'='*80}\n{'FINAL BATCH PROCESSING EXECUTION SUMMARY REPORT':^80}\n{'='*80}")
-    summary_lines.append(f"Successfully processed deployments: {success_count} / {len(tasks)}")
-    summary_lines.append(f"Number of skipped deployments: {sum(len(v) for v in skipped_deployments.values())}")
-    summary_lines.append(f"Number of hard failures encountered:  {sum(len(v) for v in errors_by_type.values())}\n")
+    summary_lines.append(f"Successfully processed deployments:  {success_count} / {len(tasks)}")
+    summary_lines.append(f"Number of skipped deployments:       {sum(len(v) for v in skipped_deployments.values())}")
+    summary_lines.append(f"Number of hard failures encountered: {sum(len(v) for v in errors_by_type.values())}")
+    summary_lines.append(f"Number of quality target misses:     {len(missed_metrics)}")
 
+    # Problematic deployments
     if skipped_deployments:
-        summary_lines.append(f"{'-'*18} SKIPPED FILES {'-'*18}")
+        summary_lines.append(f"\n{'-'*18} SKIPPED FILES {'-'*18}")
         for skip_reason, list_folders in skipped_deployments.items():
             summary_lines.append(f"  -> {skip_reason}: {len(list_folders)} deployments affected.")
 
@@ -1138,36 +1120,31 @@ def process_deployments(config_path: str = 'configurations.yml', process=True):
 
     if missed_metrics:
         summary_lines.append(f"\n{'-'*10} QUALITY THRESHOLD (80% / 90%) MISSES {'-'*10}")
-        summary_lines.append(f"Total Folders with Quality Variations: {len(missed_metrics)}")
-        for (f_id, faults) in enumerate(missed_metrics.items(), start=1):
+        for _, (f_id, faults) in enumerate(missed_metrics.items(), start=1):
             summary_lines.append(f"  -> Deployment {f_id}: {', '.join(faults)}")
 
-    summary_lines.append(f"\n{'='*80}\n")
+    # Assemble and log report
     master_summary_str = "\n".join(summary_lines)
-
-    # Output metrics directly to file and terminal before Phase 2 begins
+    master_summary_str += "\n\n"
     with open(config['log_file'], "a") as log:
         log.write(master_summary_str)
     print(master_summary_str)
 
-    # Processing timer
+    # Record processing time
     process_duration = time.perf_counter() - process_start
     if process_duration > (60 * 60):
-        process_msg = f"  > Processed {success_count} deployments in {process_duration/60/60:.2f} hours.\n"
-    elif process_duration > 60:
-        process_msg = f"  > Processed {success_count} deployments in {process_duration/60:.2f} minutes.\n"
+        process_msg = f"  Processed {success_count} deployments in {process_duration/60/60:.2f} hours.\n"
+    if process_duration > 60:
+        process_msg = f"  Processed {success_count} deployments in {process_duration/60:.2f} minutes.\n"
     else:
-        process_msg = f"  > Processed {success_count} deployments in {process_duration:.2f} seconds.\n"
-    log_and_print(process_msg, config['log_file'], indent_spaces=0)
+        process_msg = f"  Processed {success_count} deployments in {process_duration:.2f} seconds.\n"
+    log_and_print(process_msg, config['log_file'])
 
-    # =============================================================================
-    # PHASE 2: SEQUENTIAL GCP CLOUD UPLOADS (ENCODERS ARE SILENT)
-    # =============================================================================
+    # GCP CLOUD UPLOAD
     if config['gcp_upload'] and upload_queue and process:
         print("\n  > All encodings complete. Initializing sequential high-speed cloud uploads...\n", flush=True)
         upload_timer = time.perf_counter()
-        
-        pbar_up = tqdm(total=len(upload_queue), position=0, desc="Cloud Uploading", bar_format=BASE_FORMAT)
+        pbar_up = tqdm(total=len(upload_queue), position=0, desc="Cloud Uploading", bar_format=bar_format)
         
         for folder_id, output_path in upload_queue:
             try:
@@ -1176,9 +1153,6 @@ def process_deployments(config_path: str = 'configurations.yml', process=True):
                     cmd_up.append("--no-clobber")
                 cmd_up.extend([output_path, config['gcp_bucket_path']])
                 
-                # FIXED: Dropped capture_output=True to allow gcloud to interact natively with 
-                # the terminal console window. This allows the CLI to recognize the TTY interface,
-                # enabling its parallel composite chunking mechanics and unlocking your full 100 MiB/s speed.
                 result_up = subprocess.run(cmd_up)
                 
                 if result_up.returncode == 0:
@@ -1202,7 +1176,7 @@ def process_deployments(config_path: str = 'configurations.yml', process=True):
                 upload_msg = f"  > Uploaded {len(upload_queue)} videos in {upload_duration/60:.2f} minutes.\n"
             else:
                 upload_msg = f"  > Uploaded {len(upload_queue)} videos in {upload_duration:.2f} seconds.\n"
-            log_and_print(upload_msg, config['log_file'], indent_spaces=0)
+            log_and_print(upload_msg, config['log_file'])
             pbar_up.close()
             
     # Guard against dry runs, disabled uploads, and handle local cleanup
@@ -1223,13 +1197,16 @@ def process_deployments(config_path: str = 'configurations.yml', process=True):
                 overall_success = False
         upload_duration = time.perf_counter() - upload_timer
         if upload_duration > (60 * 60):
-            upload_msg = f"  > Uploaded {len(upload_queue)} videos in {upload_duration/60/60:.2f} hours.\n"
-        elif upload_duration > 60:
-            upload_msg = f"  > Uploaded {len(upload_queue)} videos in {upload_duration/60:.2f} minutes.\n"
+            upload_msg = f"  Uploaded {len(upload_queue)} videos in {upload_duration/60/60:.2f} hours.\n"
+        if upload_duration > 60:
+            upload_msg = f"  Uploaded {len(upload_queue)} videos in {upload_duration/60:.2f} minutes.\n"
         else:
-            upload_msg = f"  > Uploaded {len(upload_queue)} videos in {upload_duration:.2f} seconds.\n"
-        log_and_print(upload_msg, config['log_file'], indent_spaces=0)
+            upload_msg = f"  Uploaded {len(upload_queue)} videos in {upload_duration:.2f} seconds.\n"
+        log_and_print(upload_msg, config['log_file'])
         pbar_up.close()
+
+    with open(config['log_file'], 'a') as log:
+        log.write(f"\n{'='*80}\n")
 
     return (overall_success, os.path.basename(config['log_file']))
 
@@ -1253,9 +1230,9 @@ if __name__ == "__main__":
         runtime = f"{script_duration/60:.2f} minutes"
     else:
         runtime = f"{script_duration:.2f} seconds"
-        
+
+    # Script status    
     status_msg = "SUCCESSFULLY COMPLETED" if success else "COMPLETED WITH FUNCTIONAL ERRORS"
-    
-    print(f"\n{status_msg}")
+    print(f"{status_msg}")
     print(f"Total overall runtime: {runtime}.")
     print(f"Review '{log}' for detailed metrics.", flush=True)
