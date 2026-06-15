@@ -56,7 +56,7 @@ import difflib
 import textwrap
 import subprocess
 from tqdm import tqdm
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor
 
 # =============================================================================
 # HELPER FUNCTIONS AND METHODS
@@ -278,9 +278,9 @@ def log_and_print(message: str, log_path: str, indent_spaces: int = 4):
     """
     indent = " " * indent_spaces
     clean_msg = textwrap.indent(textwrap.dedent(message).strip(), indent)
-    print(clean_msg + "\n", flush=True)
+    tqdm.write(clean_msg + "\n")
     with open(log_path, "a") as log:
-        log.write(clean_msg + "\n\n")
+        log.write(clean_msg)
 
 def check_gcp_auth(bucket_path: str):
     """Verifies Google Cloud storage access before starting.
@@ -473,9 +473,6 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     (dict) Dictionary containing processed folder name and processing status.
             Example: {"status": "SUCCESS", "folder_id": "T60253001_A", ...}
     """
-    # Initialize high-performance thread-isolated print registry array
-    console_msgs = []
-
     # Start timer for this video for diagnostic mode
     if config['diagnostic_mode']:
         iter_start = time.perf_counter()
@@ -489,7 +486,7 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     folder_path = os.path.join(config['input_directory'], folder_id)
     if not os.path.exists(folder_path):
         log_payload += f"SKIP: Folder {folder_path} not found.\n"
-        return {"status": "SKIP", "folder_id": folder_id, "reason": "Video folder path not found", "log_payload": log_payload, "console_msgs": console_msgs}
+        return {"status": "SKIP", "folder_id": folder_id, "reason": "Video folder path not found", "log_payload": log_payload}
         
     output_path = os.path.join(
         config['output_directory'], f"{folder_id}{config['video_extension']}"
@@ -504,20 +501,20 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
 
     if not config['reprocess'] and (os.path.exists(output_path) or already_uploaded):
         log_payload += f"Deployment {folder_id} already exists locally or on GCP bucket directory. Skipping.\n"
-        return {"status": "SKIP", "folder_id": folder_id, "reason": "Output video already exists", "log_payload": log_payload, "console_msgs": console_msgs}
+        return {"status": "SKIP", "folder_id": folder_id, "reason": "Output video already exists", "log_payload": log_payload}
 
     # Skip and log any folder listed in the CSV that doesn't exist in the input
     # directory
     if not os.path.exists(folder_path):
         log_payload += f"SKIP: Folder {folder_id} not found.\n"
-        return {"status": "SKIP", "folder_id": folder_id, "reason": "Folder path not found", "log_payload": log_payload, "console_msgs": console_msgs}
+        return {"status": "SKIP", "folder_id": folder_id, "reason": "Folder path not found", "log_payload": log_payload}
 
     # 3. GATHER & SORT FILES
     video_files = [f for f in os.listdir(folder_path) 
                     if f.upper().endswith(config['video_extension'].upper())]
     if not video_files:
         log_payload += f"SKIP: No videos in {folder_id}.\n"
-        return {"status": "SKIP", "folder_id": folder_id, "reason": "No matched video extension files inside directory", "log_payload": log_payload, "console_msgs": console_msgs}
+        return {"status": "SKIP", "folder_id": folder_id, "reason": "No matched video extension files inside directory", "log_payload": log_payload}
     video_files.sort(key=get_gopro_sort_key)
 
     # 4. CALCULATE TIMELINE
@@ -534,8 +531,7 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
             "folder_id": folder_id,
             "error_type": "Metadata Corruption (FFprobe Failure)",
             "error_msg": f"Failed to parse initial file structure for '{os.path.basename(first_file_path)}'. Underlying crash: {type(e).__name__}: {str(e)}",
-            "log_payload": log_payload,
-            "console_msgs": console_msgs
+            "log_payload": log_payload
         }
 
     start_time_fps = float(config['start_time_fps'])
@@ -562,7 +558,7 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
 
     # Extract video metadata
     if config['diagnostic_mode']:
-        console_msgs.append(f"  > Probing metadata for {len(video_files)} video chapters in {folder_id}...")
+        tqdm.write(f"  > Probing metadata for {len(video_files)} video chapters in {folder_id}...")
     file_data = []
     for f in video_files:
         full_p = os.path.join(folder_path, f)
@@ -577,8 +573,7 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
                 "folder_id": folder_id,
                 "error_type": "Metadata Corruption (FFprobe Failure)",
                 "error_msg": f"Failed to parse intermediate chapter file components for '{f}'. Structural data is likely missing or corrupt. Underlying crash: {type(e).__name__}: {str(e)}",
-                "log_payload": log_payload,
-                "console_msgs": console_msgs
+                "log_payload": log_payload
             }
 
         file_data.append({
@@ -593,7 +588,7 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     # Check the start times and durations of each video to determine which
     # files are needed to stitch together and where to clip partial videos
     if config['diagnostic_mode']:
-        console_msgs.append("  > Determining needed files and trim points...")
+        tqdm.write("  > Determining needed files and trim points...")
     cumulative_time = 0
     needed_files = []
     for data in file_data:
@@ -638,14 +633,13 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
                 "status": "SKIP", 
                 "folder_id": folder_id, 
                 "reason": "Insufficient video footage", 
-                "log_payload": log_payload,
-                "console_msgs": console_msgs
+                "log_payload": log_payload
             }
 
     # If no footage matches the 24-minute window, log and skip
     if not needed_files:
         log_payload += f"SKIP: {folder_id} - No footage found for the requested time window.\n"
-        return {"status": "SKIP", "folder_id": folder_id, "reason": "No overlapping footage found within clipping window", "log_payload": log_payload, "console_msgs": console_msgs}
+        return {"status": "SKIP", "folder_id": folder_id, "reason": "No overlapping footage found within clipping window", "log_payload": log_payload}
 
     # 5. CLIP AND STITCH
     # See https://ffmpeg.org/ffmpeg.html
@@ -662,24 +656,19 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
         # Trim the video using start time and duration (seconds) and reset the
         # clock of the trimmed segment (`setpts`) to 0 so the stitcher sees a
         # clean sequence starting from 0.0s
-        v_label = f"[v{i}]"
-        a_label = f"[a{i}]"
+        trim_label = f"[v{i}]"
         filter_complex_parts.append(
             f"[{i}:v]trim=start={f_info['ss']}:duration={f_info['t']},"
-            f"setpts=PTS-STARTPTS{v_label}"
+            f"setpts=PTS-STARTPTS{trim_label}"
         )
-        filter_complex_parts.append(
-            f"[{i}:a]atrim=start={f_info['ss']}:duration={f_info['t']},"
-            f"asetpts=PTS-STARTPTS{a_label}"
-        )
-        filter_inputs += f"{v_label}{a_label}"
+        filter_inputs += trim_label
 
     # Target bitrate based on original GoPro metadata to ensure visual
     # fidelity
     target_bitrate = f"{int(cumulative_size * 8 / (pd_duration_seconds * time_scaling))}"
     is_auto_mode = str(config['quality_crf']).lower() == 'auto'
     if is_auto_mode and config['diagnostic_mode']:
-        console_msgs.append(f"  > Targeting bitrate {int(target_bitrate)/1_000_000:.2f} Mbps to match source density.")
+        tqdm.write(f"  > Targeting bitrate {int(target_bitrate)/1_000_000:.2f} Mbps to match source density.")
 
     # Build the filter string: e.g., `[0:v][1:v]concat=n=2:v=1[outv]`:
     fps_logic = f"fps=fps={output_fps}:round=near"
@@ -687,10 +676,10 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
         fps_logic += f",setpts=N/({output_fps}*TB)"
 
     concat_part = (
-        f"{filter_inputs}concat=n={len(needed_files)}:v=1:a=1[v_stitched][outa]"
+        f"{filter_inputs}concat=n={len(needed_files)}:v=1,"
+        f"{fps_logic}[outv]"
     )
     filter_complex_parts.append(concat_part)
-    filter_complex_parts.append(f"[v_stitched]{fps_logic}[outv]")
     maparg = "[outv]"
 
     # Join all filter parts with semicolons
@@ -746,7 +735,7 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     _, _, worker_free = shutil.disk_usage(config['output_directory'])
     if (worker_free // (2**30)) < config['min_gb_required'] and process:
         log_payload += f"SKIP: {folder_id} - Disk space critical ({worker_free // (2**30)}GB left).\n"
-        return {"status": "SKIP", "folder_id": folder_id, "reason": "Disk space safety constraints tripped", "log_payload": log_payload, "console_msgs": console_msgs}
+        return {"status": "SKIP", "folder_id": folder_id, "reason": "Disk space safety constraints tripped", "log_payload": log_payload}
 
     # Build execution command
     if config['use_gpu']:
@@ -805,10 +794,10 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     #       offsets, seam stitches, and text.
     #   -map: Instruct engine to route the final custom multi-stitched video
     #       stream to the output.
-    #   -map [outa]: Route the synchronized and stitched audio stream to the output file container.
+    #   -an: Strip all incoming audio layers (audio-less stream) to protect
+    #       processing density bounds.
     #   encoder_args: Compression configuration settings designated for CPU
     #       (libx264) or GPU hardware context.
-    #   -c:a aac: Specify the Advanced Audio Coding (AAC) codec for the stitched audio stream tracking.
     #   -r: Force constant target frames per second metrics for tracking
     #       compatibility parameters.
     #   -fps_mode cfr: Force constant baseline frame mapping to override
@@ -822,9 +811,8 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     ] + input_args + [
         "-filter_complex", filter_str,
         "-map", maparg,
-        "-map", "[outa]"
+        "-an"
     ] + encoder_args + [
-        "-c:a", "aac",
         "-r", str(output_fps),
         "-fps_mode", "cfr",
         "-video_track_timescale", "30000",
@@ -850,8 +838,7 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
                         "folder_id": folder_id, 
                         "error_type": "FFmpeg Timeout", 
                         "error_msg": f"Execution halted after timing out consistently across {max_attempts} distinct attempts.",
-                        "log_payload": log_payload,
-                        "console_msgs": console_msgs
+                        "log_payload": log_payload
                     }
                 time.sleep(5) 
                 continue
@@ -863,8 +850,7 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
                 "folder_id": folder_id, 
                 "error_type": "FFmpeg Fatal Exit Code", 
                 "error_msg": result.stderr.strip().split('\n')[-1],
-                "log_payload": log_payload,
-                "console_msgs": console_msgs
+                "log_payload": log_payload
             }
     
     # Calculate actual metrics for the final video
@@ -889,11 +875,11 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     if config['diagnostic_mode']:
         iter_duration = time.perf_counter() - iter_start
         if iter_duration > 60:
-            console_msgs.append(f"  > Created {folder_id}{config['video_extension']} in {iter_duration/60:.2f} minutes.\n")
+            tqdm.write(f"  > Created {folder_id}{config['video_extension']} in {iter_duration/60:.2f} minutes.\n")
         else:
-            console_msgs.append(f"  > Created {folder_id}{config['video_extension']} in {iter_duration:.2f} seconds.\n")
-        console_msgs.append("    Output file metrics versus expectations:\n")
-        console_msgs.append(expectations_table_str)
+            tqdm.write(f"  > Created {folder_id}{config['video_extension']} in {iter_duration:.2f} seconds.\n")
+        tqdm.write("    Output file metrics versus expectations:\n")
+        tqdm.write(expectations_table_str)
 
     # Check expectations
     is_bpp_ideal_80 = avg_bpp_src * 0.80 <= actual_bpp <= avg_bpp_src * 1.20
@@ -933,67 +919,21 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     elif not all([is_bpp_ideal_80, is_size_ideal_80]):
         log_payload += f"{warning_80}\n{quality_note}\n"
 
-    # GCP high-speed pipeline upload block
-    upload_status = "PENDING"
-    throughput_rate = "Unknown"
-    console_msg = ""
-    upload_speed_mibs = 0.0  # Initialize a raw float tracking variable
-
-    if config['gcp_upload'] and process:
-        try:
-            gcloud_exec = shutil.which("gcloud")
-            cmd_up = [gcloud_exec, "storage", "cp", output_path, config['gcp_bucket_path']]
-            
-            result_up = subprocess.run(cmd_up, capture_output=True, text=True)
-            
-            if result_up.returncode == 0:
-                upload_status = "SUCCESS"
-                
-                # Parse out the final throughput summary from the buffered stderr block
-                for out_line in reversed(result_up.stderr.splitlines()):
-                    if "throughput" in out_line.lower():
-                        throughput_rate = out_line.split(":")[-1].strip()
-                        
-                        # Extract the numeric float value and normalize units for the average calculation
-                        spd_match = re.search(r'([0-9.]+)\s*([a-zA-Z/]+)', throughput_rate)
-                        if spd_match:
-                            val = float(spd_match.group(1))
-                            unit = spd_match.group(2).lower()
-                            if 'k' in unit:
-                                upload_speed_mibs = val / 1024.0  # Normalize KiB to MiB
-                            elif 'b' in unit and 'm' not in unit:
-                                upload_speed_mibs = val / (1024.0 * 1024.0)  # Normalize Bytes to MiB
-                            else:
-                                upload_speed_mibs = val  # Already MiB/s or MB/s
-                        break
-                
-                console_msg = f"  > {folder_id} uploaded to GCP at {throughput_rate}"
-                if config['delete_local_after_upload']:
-                    os.remove(output_path)
-            else:
-                upload_status = f"FAILED: {result_up.stderr.strip()}"                
-        
-        except Exception as e:
-            upload_status = f"FAILED: {str(e)}"
-
     if result.returncode == 0:
         log_payload += full_table_str
         if config['diagnostic_mode']:
-            console_msgs.append(full_table_str)
+            tqdm.write(full_table_str)
 
     # Return the entire un-clipped string package smoothly to the parent thread
     return {
         "status": "SUCCESS", 
         "folder_id": folder_id, 
-        "upload_status": upload_status, 
         "output_path": output_path,
         "targets": {
             "bpp_80": is_bpp_ideal_80, "size_80": is_size_ideal_80,
             "bpp_90": is_bpp_ideal_90, "size_90": is_size_ideal_90
         },
-        "log_payload": log_payload,
-        "console_msgs": console_msgs,
-        "upload_speed": upload_speed_mibs
+        "log_payload": log_payload
     }
 
 # =============================================================================
@@ -1002,6 +942,7 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
 
 def process_deployments(config_path: str = 'configurations.yml', process=True):
     """Orchestrates parallel processing and returns True if no critical errors occurred."""
+    process_start = time.perf_counter()
     
     # SETTINGS THAT CAN ALSO BE SET IN THE YAML CONFIG FILE
     config = load_config(config_path.strip('"'))
@@ -1109,48 +1050,42 @@ def process_deployments(config_path: str = 'configurations.yml', process=True):
     skipped_deployments = defaultdict(list)
     success_count = 0
 
-# Total progress bar
-    custom_format = "{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{postfix}]"
-    pbar = tqdm(total=len(tasks), position=0, desc="Total Progress", bar_format=custom_format)
-    pbar.set_postfix_str("Avg Upload: N/A")
+    # Total progress bar setup for Phase 1
+    BASE_FORMAT = "{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt}"
+    pbar = tqdm(total=len(tasks), position=0, desc="Encoding Video", bar_format=BASE_FORMAT)
 
-    # Initialize a list to hold successful network metrics across parallel returns
-    successful_upload_speeds = []
+    # Initialize a tracking array to hold successful file paths for the secondary upload phase
+    upload_queue = []
 
-    try:
-        # Added the initializer parameter to shield workers from signal absorption
-        with ProcessPoolExecutor(max_workers=config['num_workers'], initializer=init_worker) as executor:
-            futures = {}
-            for task_idx, row in enumerate(tasks, start=1):
-                future = executor.submit(
-                    process_single_deployment, 
-                    row, config, ffmpeg_exe, ffprobe_exe, 
-                    process, remote_inventory
-                )
-                futures[future] = row
-            for future in as_completed(futures):
+    from concurrent.futures import wait, FIRST_COMPLETED
+    
+    with ProcessPoolExecutor(max_workers=config['num_workers'], initializer=init_worker) as executor:
+        futures_map = {}
+        for row in tasks:
+            future = executor.submit(
+                process_single_deployment, 
+                row, config, ffmpeg_exe, ffprobe_exe, 
+                process, remote_inventory
+            )
+            futures_map[future] = row
+
+        futures_list = list(futures_map.keys())
+
+        while futures_list:
+            # Polling interval prevents Windows from swallowing Ctrl+C signals
+            done, _ = wait(futures_list, timeout=0.5, return_when=FIRST_COMPLETED)
+            
+            for future in done:
+                futures_list.remove(future)
                 result = future.result()
-                
-                # Write any console outputs safely through the parent process tqdm wrapper
-                if result.get('console_msgs'):
-                    for msg in result['console_msgs']:
-                        tqdm.write(msg)
-                        
-                pbar.update(1)
                 folder_id = result['folder_id']
                 
-                # Dynamic performance evaluation updates
-                if result.get('upload_speed') and result['upload_speed'] > 0:
-                    successful_upload_speeds.append(result['upload_speed'])
-                    running_avg = sum(successful_upload_speeds) / len(successful_upload_speeds)
-                    pbar.set_postfix_str(f"Avg Upload: {running_avg:.1f} MiB/s")
+                pbar.update(1)
                 
-                # Write log
                 if result.get('log_payload'):
                     with open(config['log_file'], "a") as log:
                         log.write(result['log_payload'])
                 
-                # Non-blocking collection of worker process hard termination errors
                 if result['status'] == "ERROR":
                     err_type = result.get('error_type', 'Unclassified Functional Error')
                     err_msg = result.get('error_msg', 'No trace log strings provided.')
@@ -1163,45 +1098,22 @@ def process_deployments(config_path: str = 'configurations.yml', process=True):
                     
                 elif result['status'] == "SUCCESS":
                     success_count += 1
+                    # Queue the file path for the sequential upload phase
+                    upload_queue.append((folder_id, result['output_path']))
+                    
                     t_flags = result.get('targets', {})
                     missed_list = []
                     if not t_flags.get('bpp_80'):
                         missed_list.append("Missed 80% BPP target")
+                    elif not t_flags.get('bpp_90'):
+                        missed_list.append("Missed 90% BPP target")
                     if not t_flags.get('size_80'):
                         missed_list.append("Missed 80% file size target")
-                    if not t_flags.get('bpp_90'):
-                        missed_list.append("Missed 90% BPP target")
-                    if not t_flags.get('size_90'):
+                    elif not t_flags.get('size_90'):
                         missed_list.append("Missed 90% file size target")
                     
                     if missed_list:
                         missed_metrics[folder_id] = missed_list
-
-                    # Cleanly collect upload statuses only when GCP routines are
-                    # globally enabled
-                    if config['gcp_upload'] and result.get('upload_status') and not result['upload_status'] == "SUCCESS":
-                        failed_uploads.append(result['output_path'])
-    
-    except KeyboardInterrupt:
-        # CONCURRENT PROCESS TREE CLEANUP GUARD
-        print("\n\n[!] USER ABORT DETECTED: Killing all video processing and cloud upload channels immediately...")
-        pbar.close()
-        
-        # Prevent remaining queued items from running and clear the pipeline pool
-        executor.shutdown(wait=False, cancel_futures=True)
-        
-        # Execute a platform-specific tree-nuke to ensure no orphan background FFmpeg processes leak
-        if sys.platform.startswith("win"):
-            # Windows: Forcefully terminate the process tree (/T) matching this script's PID
-            subprocess.run(["taskkill", "/F", "/T", "/PID", str(os.getpid())], capture_output=True)
-        else:
-            # Mac/Linux: Signal the entire process group hierarchy to terminate instantly
-            import signal
-            try:
-                os.killpg(os.getpgrp(), signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-        sys.exit(1)
 
     pbar.close()
 
@@ -1227,22 +1139,81 @@ def process_deployments(config_path: str = 'configurations.yml', process=True):
     if missed_metrics:
         summary_lines.append(f"\n{'-'*10} QUALITY THRESHOLD (80% / 90%) MISSES {'-'*10}")
         summary_lines.append(f"Total Folders with Quality Variations: {len(missed_metrics)}")
-        for idx, (f_id, faults) in enumerate(missed_metrics.items(), start=1):
+        for (f_id, faults) in enumerate(missed_metrics.items(), start=1):
             summary_lines.append(f"  -> Deployment {f_id}: {', '.join(faults)}")
 
     summary_lines.append(f"\n{'='*80}\n")
     master_summary_str = "\n".join(summary_lines)
 
-    # Output metrics directly to file and terminal
+    # Output metrics directly to file and terminal before Phase 2 begins
     with open(config['log_file'], "a") as log:
         log.write(master_summary_str)
     print(master_summary_str)
 
+    # Processing timer
+    process_duration = time.perf_counter() - process_start
+    if process_duration > (60 * 60):
+        process_msg = f"  > Processed {success_count} deployments in {process_duration/60/60:.2f} hours.\n"
+    elif process_duration > 60:
+        process_msg = f"  > Processed {success_count} deployments in {process_duration/60:.2f} minutes.\n"
+    else:
+        process_msg = f"  > Processed {success_count} deployments in {process_duration:.2f} seconds.\n"
+    log_and_print(process_msg, config['log_file'], indent_spaces=0)
+
+    # =============================================================================
+    # PHASE 2: SEQUENTIAL GCP CLOUD UPLOADS (ENCODERS ARE SILENT)
+    # =============================================================================
+    if config['gcp_upload'] and upload_queue and process:
+        print("\n  > All encodings complete. Initializing sequential high-speed cloud uploads...\n", flush=True)
+        upload_timer = time.perf_counter()
+        
+        pbar_up = tqdm(total=len(upload_queue), position=0, desc="Cloud Uploading", bar_format=BASE_FORMAT)
+        
+        for folder_id, output_path in upload_queue:
+            try:
+                cmd_up = [gcloud_exec, "storage", "cp"]
+                if not config['reprocess']:
+                    cmd_up.append("--no-clobber")
+                cmd_up.extend([output_path, config['gcp_bucket_path']])
+                
+                # FIXED: Dropped capture_output=True to allow gcloud to interact natively with 
+                # the terminal console window. This allows the CLI to recognize the TTY interface,
+                # enabling its parallel composite chunking mechanics and unlocking your full 100 MiB/s speed.
+                result_up = subprocess.run(cmd_up)
+                
+                if result_up.returncode == 0:
+                    tqdm.write(f"  > {folder_id} uploaded to GCP successfully.")
+                    if config['delete_local_after_upload'] and os.path.exists(output_path):
+                        os.remove(output_path)
+                else:
+                    failed_uploads.append(output_path)
+                    tqdm.write(f"  [!] UPLOAD RESOURCE ERROR for {folder_id}")
+            except Exception as e:
+                failed_uploads.append(output_path)
+                tqdm.write(f"  [!] UPLOAD CRASH for {folder_id}: {str(e)}")
+            
+            pbar_up.update(1)
+        
+        if not failed_uploads:
+            upload_duration = time.perf_counter() - upload_timer
+            if upload_duration > (60 * 60):
+                upload_msg = f"  > Uploaded {len(upload_queue)} videos in {upload_duration/60/60:.2f} hours.\n"
+            elif upload_duration > 60:
+                upload_msg = f"  > Uploaded {len(upload_queue)} videos in {upload_duration/60:.2f} minutes.\n"
+            else:
+                upload_msg = f"  > Uploaded {len(upload_queue)} videos in {upload_duration:.2f} seconds.\n"
+            log_and_print(upload_msg, config['log_file'], indent_spaces=0)
+            pbar_up.close()
+            
     # Guard against dry runs, disabled uploads, and handle local cleanup
     if process and config['gcp_upload'] and failed_uploads:
         gcloud_exec = shutil.which("gcloud")
         for path in failed_uploads:
-            retry = subprocess.run([gcloud_exec, "storage", "cp", path, config['gcp_bucket_path']])
+            cmd_retry = [gcloud_exec, "storage", "cp"]
+            if not config['reprocess']:
+                cmd_retry.append("--no-clobber")
+            cmd_retry.extend([path, config['gcp_bucket_path']])
+            retry = subprocess.run(cmd_retry)
             if retry.returncode == 0:
                 # If the recovery upload succeeded, check if we need to delete
                 # the local copy
@@ -1250,6 +1221,15 @@ def process_deployments(config_path: str = 'configurations.yml', process=True):
                     os.remove(path)
             else:
                 overall_success = False
+        upload_duration = time.perf_counter() - upload_timer
+        if upload_duration > (60 * 60):
+            upload_msg = f"  > Uploaded {len(upload_queue)} videos in {upload_duration/60/60:.2f} hours.\n"
+        elif upload_duration > 60:
+            upload_msg = f"  > Uploaded {len(upload_queue)} videos in {upload_duration/60:.2f} minutes.\n"
+        else:
+            upload_msg = f"  > Uploaded {len(upload_queue)} videos in {upload_duration:.2f} seconds.\n"
+        log_and_print(upload_msg, config['log_file'], indent_spaces=0)
+        pbar_up.close()
 
     return (overall_success, os.path.basename(config['log_file']))
 
@@ -1267,6 +1247,8 @@ if __name__ == "__main__":
     
     # Calculate total script processing runtime duration
     script_duration = time.perf_counter() - script_start
+    if script_duration > (60 * 60):
+        runtime = f"{script_duration/60/60:.2f} hours"
     if script_duration > 60:
         runtime = f"{script_duration/60:.2f} minutes"
     else:
