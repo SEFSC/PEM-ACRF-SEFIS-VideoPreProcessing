@@ -1,12 +1,14 @@
 """
 Cloud upload file check
 -----------------------
-A file inspection utility that compares file names and sizes between the input (source) directory and the Google Cloud Project (GCP) storage bucket using the same configuration YAML file as the original script.
+A file inspection utility that compares file names and sizes between the input
+(source) directory and the Google Cloud Project (GCP) storage bucket using the
+same configuration YAML file as the original script.
 
 Usage:
     python cloud-upload-check.py path/to/name-of-configuration-file.yml
 
-Author:  matt.grossi@noaa.gov with creation and refactoring assistance from
+Author:  matt.grossi at noaa.gov with creation and refactoring assistance from
          Google Gemini Coding Partner
 Project: Southeast Fishery Independent Survey (SEFIS)
 Version: 2026.1.0
@@ -27,6 +29,7 @@ import os
 import csv
 import shutil
 import argparse
+import posixpath
 
 # =============================================================================
 # HELPER FUNCTIONS AND METHODS
@@ -81,13 +84,16 @@ def extract_gcp_prefix(bucket_path):
     -------
     Returns the file prefix only
     """
-    # Parse the gs:// URI safely (separates bucket from path)
+    # Parse the gs:// URI safely (separates bucket from path) and remove
+    # leading slash
     # urlparse("gs://my-bucket/folder/*.MP4").path -> "/folder/*.MP4"
     parsed_path = urlparse(bucket_path).path
+    clean_path = parsed_path.lstrip('/')
     
-    # Strip the leading slash left over by urlparse
-    prefix = parsed_path.lstrip('/')
-    
+    # Isolate just the directory tree structure, ignoring trailing wildcards or
+    # filenames
+    prefix = posixpath.dirname(clean_path)
+
     # Return with a trailing slash, or empty string if it's the bucket root
     return f"{prefix.rstrip('/')}/" if prefix else ""
 
@@ -173,7 +179,7 @@ def get_local_manifest(local_path, prefix, extension=None):
                 
     return local_data
 
-def compare_inventories(local, cloud):
+def compare_inventories(local, cloud, extension):
     """Compares local file names and sizes with those in the cloud and prints
     results.
     
@@ -182,7 +188,8 @@ def compare_inventories(local, cloud):
     local (dict): dictionary containing `file_name: file_size` pairs for all
         local files
     cloud (dict): dictionary containing `file_name: file size` pairs for all
-        cloud files    
+        cloud files
+    extension (str): file extension
     """
 
     print("\nAnalyzing discrepancies...")
@@ -196,13 +203,13 @@ def compare_inventories(local, cloud):
     for p, local_size in local.items():
         if p in cloud and cloud[p] != local_size:
             size_mismatches.append((p, local_size, cloud[p]))
-    extension = p.split('.')[-1]
+    ext = extension.lstrip('.')
 
     print("\n=====================================")
     print("        COMPARISON RESULTS           ")
     print("=====================================")
-    print(f"Local drive count: {len(local)} {extension} files")
-    print(f"GCP Bucket count:  {len(cloud)} {extension} objects")
+    print(f"Local drive count: {len(local)} {ext} files")
+    print(f"GCP Bucket count:  {len(cloud)} {ext} objects")
     print("-------------------------------------")
 
     if not missing_in_cloud and not missing_in_local and not size_mismatches:
@@ -247,4 +254,8 @@ if __name__ == "__main__":
         )
     
     # Compare and Print
-    compare_inventories(local=local_inventory, cloud=cloud_inventory)
+    compare_inventories(
+        local=local_inventory,
+        cloud=cloud_inventory,
+        extension=config['video_extension']
+        )
