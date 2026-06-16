@@ -572,7 +572,21 @@ Tip
 </div></li>
 <li><p>Execute the <code>process_videos.py</code> script, passing the path to the desired configurations YAML file as an argument:</p>
 <div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb5"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> process_videos.py path/to/config.yaml</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
-<p>No other arguments are needed. The script will run according to the settings specified in the YAML file.</p></li>
+<p>The script will run according to the settings specified in the YAML file.</p>
+<p>An optional flag <code>--no-processing</code> can be used to suppress video processing when running the script. Everything else is done, including gathering video metadata information, determining what videos to stitch, and logging the results, but the command to actually process the videos is skipped. This can save a considerable amount of compute time – hours to days, depending on the number of deployments – when testing and fixing issues. For example, if a log file has become cluttered with less-than-useful information from several unsuccessful script runs due to video problems within a given set of deployments, once the video issues have been resolved and the deployments processed properly, consider using this flag in combination with <code>reprocess: true</code> and <code>clear_log: true</code> in the configuration file to re-create a fresh log file without taking the time to actually reprocess the videos, or use it with <code>reprocess: true</code> and <code>gcp_upload: true</code> to upload existing videos to the cloud that were not previously uploaded when the script was run.</p>
+<div class="callout callout-style-default callout-note callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+Note
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<p>This usage option is only available when executing the script via command line. The only way to invoke it using the <code>.R</code> or <code>.bat</code> wrappers is to modify the launch command inside those respective files. Do this at your own risk, if you know what you’re doing.</p>
+</div>
+</div></li>
 <li><p>When finished, deactivate the virtual environment:</p>
 <div class="code-with-filename">
 <div class="code-with-filename-file">
