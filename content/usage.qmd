@@ -61,7 +61,13 @@ Users comfortable with command line and Python can run the `process_videos.py` s
    python process_videos.py path/to/config.yaml
    ```
 
-   No other arguments are needed. The script will run according to the settings specified in the YAML file.
+   The script will run according to the settings specified in the YAML file.
+
+   An optional flag `--no-processing` can be used to suppress video processing when running the script. Everything else is done, including gathering video metadata information, determining what videos to stitch, and logging the results, but the command to actually process the videos is skipped. This can save a considerable amount of compute time -- hours to days, depending on the number of deployments -- when testing and fixing issues. For example, if a log file has become cluttered with less-than-useful information from several unsuccessful script runs due to video problems within a given set of deployments, once the video issues have been resolved and the deployments processed properly, consider using this flag in combination with `reprocess: true` and `clear_log: true` in the configuration file to re-create a fresh log file without taking the time to actually reprocess the videos, or use it with `reprocess: true` and `gcp_upload: true` to upload existing videos to the cloud that were not previously uploaded when the script was run.
+
+   :::{.callout-note}
+   This usage option is only available when executing the script via command line. The only way to invoke it using the `.R` or `.bat` wrappers is to modify the launch command inside those respective files. Do this at your own risk, if you know what you're doing.
+   :::
 
 3. When finished, deactivate the virtual environment:
 
