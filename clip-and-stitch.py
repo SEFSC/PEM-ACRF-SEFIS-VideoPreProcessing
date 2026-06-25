@@ -16,7 +16,7 @@ Key Features:
         `HH:MM:SS:FF` format for frame-by-frame verification.
 
 Usage:
-    python clip-and-stitch.py path/to/name-of-configuration-file.yml
+    python clip-and-stitch.py path/to/name-of-configuration-file.yml --include-audio
 
 Required Dependencies:
     * pandas: For CSV data management.
@@ -109,7 +109,7 @@ def clean_and_validate_config(config: dict):
         'delete_local_after_upload', 'diagnostic_mode',
         'ffmpeg_path', 'ffprobe_path',
         'gcp_bucket_path', 'gcp_upload',
-        'input_directory',
+        'include_audio', 'input_directory',
         'log_file',
         'max_retries', 'min_gb_required',
         'num_workers',
@@ -140,7 +140,8 @@ def clean_and_validate_config(config: dict):
     # Clean up Bool , if needed
     BOOLEAN_KEYS = {
         'clear_log', 'delete_local_after_upload', 'diagnostic_mode', 
-        'gcp_upload', 'reprocess', 'skip_partial_videos', 'use_gpu'
+        'gcp_upload', 'include_audio', 'reprocess', 'skip_partial_videos',
+        'use_gpu'
     }
     for key in BOOLEAN_KEYS:
         if key in config and isinstance(config[key], str):
@@ -641,13 +642,14 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
         log_payload += f"SKIP: {folder_id} - No footage found for the requested time window.\n"
         return {"status": "SKIP", "folder_id": folder_id, "reason": "No overlapping footage found within clipping window", "log_payload": log_payload}
 
-    # CLIP AND STITCH
+    # DYNAMIC DUAL-TRACK CLIP AND STITCH ORCHESTRATION
     # See https://ffmpeg.org/ffmpeg.html
     cumulative_size = 0
     cumulative_bpp = 0
     input_args = []
     filter_complex_parts = []
     filter_inputs = ""
+
     for i, f_info in enumerate(needed_files):
         cumulative_size += f_info['size']
         cumulative_bpp += f_info['bpp']
@@ -656,12 +658,21 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
         # Trim the video using start time and duration (seconds) and reset the
         # clock of the trimmed segment (`setpts`) to 0 so the stitcher sees a
         # clean sequence starting from 0.0s
-        trim_label = f"[v{i}]"
+        v_label = f"[v{i}]"
         filter_complex_parts.append(
             f"[{i}:v]trim=start={f_info['ss']}:duration={f_info['t']},"
-            f"setpts=PTS-STARTPTS{trim_label}"
+            f"setpts=PTS-STARTPTS{v_label}"
         )
-        filter_inputs += trim_label
+        
+        if config['include_audio']:
+            a_label = f"[a{i}]"
+            filter_complex_parts.append(
+                f"[{i}:a]atrim=start={f_info['ss']}:duration={f_info['t']},"
+                f"asetpts=PTS-STARTPTS{a_label}"
+            )
+            filter_inputs += f"{v_label}{a_label}"
+        else:
+            filter_inputs += v_label
 
     # Target bitrate based on original GoPro metadata to ensure visual fidelity
     target_bitrate = f"{int(cumulative_size * 8 / (pd_duration_seconds * time_scaling))}"
@@ -674,11 +685,16 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     if raw_target != 'auto':
         fps_logic += f",setpts=N/({output_fps}*TB)"
 
-    concat_part = (
-        f"{filter_inputs}concat=n={len(needed_files)}:v=1,"
-        f"{fps_logic}[outv]"
-    )
-    filter_complex_parts.append(concat_part)
+    if config['include_audio']:
+        concat_part = f"{filter_inputs}concat=n={len(needed_files)}:v=1:a=1[v_stitched][outa]"
+        filter_complex_parts.append(concat_part)
+        filter_complex_parts.append(f"[v_stitched]{fps_logic}[outv]")
+        audio_args = ["-map", "[outa]"]
+    else:
+        concat_part = f"{filter_inputs}concat=n={len(needed_files)}:v=1,{fps_logic}[outv]"
+        filter_complex_parts.append(concat_part)
+        audio_args = ["-an"]
+        
     maparg = "[outv]"
 
     # Join all filter parts with semicolons
@@ -785,33 +801,12 @@ def process_single_deployment(row: dict, config: dict, ffmpeg_exe: str, ffprobe_
     # Video duration for metadata
     final_metadata_t = pd_duration_seconds if raw_target != 'auto' else (pd_duration_seconds * time_scaling)
 
-    # See https://ffmpeg.org/ffmpeg.html for explicit argument specifications:
-    #   -y: Overwrite matching existing target output files without prompting.
-    #   input_args: Dynamic sequence array containing absolute paths to
-    #       identified chapters (-i paths).
-    #   -filter_complex: Pass consolidated filtergraph string defining trim
-    #       offsets, seam stitches, and text.
-    #   -map: Instruct engine to route the final custom multi-stitched video
-    #       stream to the output.
-    #   -an: Strip all incoming audio layers (audio-less stream) to protect
-    #       processing density bounds.
-    #   encoder_args: Compression configuration settings designated for CPU
-    #       (libx264) or GPU hardware context.
-    #   -r: Force constant target frames per second metrics for tracking
-    #       compatibility parameters.
-    #   -fps_mode cfr: Force constant baseline frame mapping to override
-    #       hardware timing variances.
-    #   -video_track_timescale: Set custom navigation tickrate (30000) for
-    #       clean frame-seeking performance.
-    #   -t: Limit absolute tracking duration data to requested survey window
-    #       constraints.
     cmd = [
         ffmpeg_exe, "-y"
     ] + input_args + [
         "-filter_complex", filter_str,
-        "-map", maparg,
-        "-an"
-    ] + encoder_args + [
+        "-map", maparg
+    ] + audio_args + encoder_args + [
         "-r", str(output_fps),
         "-fps_mode", "cfr",
         "-video_track_timescale", "30000",
@@ -932,6 +927,7 @@ def process_deployments(config_path: str = 'configurations.yml', process=True):
     config['diagnostic_mode'] = config.get('diagnostic_mode', False)
     config['gcp_upload'] = config.get('gcp_upload', False)
     config['log_file'] = config.get('log_file', 'processing_log.txt')
+    config['include_audio'] = config.get('include_audio', False)
     config['max_retries'] = config.get('max_retries', 2)
     config['min_gb_required'] = config.get('min_gb_required', 10)
     config['num_workers'] = config.get('num_workers', 1)
@@ -945,7 +941,7 @@ def process_deployments(config_path: str = 'configurations.yml', process=True):
     config['use_gpu'] = config.get('use_gpu', False)
     config['video_duration_minutes'] = config.get('video_duration_minutes', 24)
     config['video_extension'] = config.get('video_extension', '.MP4')
-
+    
     ffmpeg_exe = get_ffmpeg_command(config=config, tool="ffmpeg")
     ffprobe_exe = get_ffmpeg_command(config=config, tool="ffprobe")
 
@@ -1153,7 +1149,14 @@ def process_deployments(config_path: str = 'configurations.yml', process=True):
                     cmd_up.append("--no-clobber")
                 cmd_up.extend([output_path, config['gcp_bucket_path']])
                 
-                result_up = subprocess.run(cmd_up)
+                # FORCE ACCELERATION: Override gcloud's environmental assumptions
+                # and force its high-speed parallel graph engine to initialize.
+                upload_env = os.environ.copy()
+                upload_env["CLOUDSDK_STORAGE_PROCESS_COUNT"] = "16"
+                upload_env["CLOUDSDK_STORAGE_THREAD_COUNT"] = "8"
+                upload_env["CLOUDSDK_STORAGE_PARALLEL_COMPOSITE_UPLOAD_ENABLED"] = "True"
+                
+                result_up = subprocess.run(cmd_up, env=upload_env)
                 
                 if result_up.returncode == 0:
                     tqdm.write(f"  > {folder_id} uploaded to GCP successfully.")
@@ -1187,7 +1190,13 @@ def process_deployments(config_path: str = 'configurations.yml', process=True):
             if not config['reprocess']:
                 cmd_retry.append("--no-clobber")
             cmd_retry.extend([path, config['gcp_bucket_path']])
-            retry = subprocess.run(cmd_retry)
+            
+            upload_env = os.environ.copy()
+            upload_env["CLOUDSDK_STORAGE_PROCESS_COUNT"] = "16"
+            upload_env["CLOUDSDK_STORAGE_THREAD_COUNT"] = "8"
+            upload_env["CLOUDSDK_STORAGE_PARALLEL_COMPOSITE_UPLOAD_ENABLED"] = "True"
+            
+            retry = subprocess.run(cmd_retry, env=upload_env)
             if retry.returncode == 0:
                 # If the recovery upload succeeded, check if we need to delete
                 # the local copy
