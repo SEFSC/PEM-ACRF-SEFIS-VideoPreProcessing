@@ -113,8 +113,8 @@ if exist "ffmpeg\bin\ffmpeg.exe" (
     goto :FFmpegReady
 )
 
-echo [INFO] FFmpeg not found. Downloading portable version...
-curl -L -o ffmpeg.zip https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip
+echo [INFO] FFmpeg not found. Downloading compatible portable version (FFmpeg 7.1)...
+curl -L -o ffmpeg.zip https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-7.1-essentials_build.zip
 
 echo [INFO] Extracting FFmpeg...
 tar -xf ffmpeg.zip
